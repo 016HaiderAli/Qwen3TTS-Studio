@@ -3,20 +3,27 @@
 This is the ONLY module in the repository that imports ``qwen_tts``/PyTorch.
 It wraps exactly the workflow proven in reference/Voice_Studio.ipynb:
 
-  - VoiceDesign model: ``generate_voice_design(text, language, instruct)``
-  - Base model:        ``create_voice_clone_prompt(ref_audio, ref_text)``
-  - Base model:        ``generate_voice_clone(text, language, voice_clone_prompt)``
+  - VoiceDesign model: ``generate_voice_design(text, language, instruct)`` (cell 15)
+  - Base model:        ``create_voice_clone_prompt(ref_audio=str(path), ref_text)`` (cell 21)
+  - Base model:        ``generate_voice_clone(text, language, voice_clone_prompt)`` (cell 32/36)
 
 The module imports torch/qwen-tts lazily, so importing the worker package does
 not require a GPU environment. GPU inference has NOT been validated in the
 current development environment; this code is the interface the real GPU host
-runs, mirroring the notebook calls.
+runs, mirroring the notebook calls. Run ``qwen_tts_worker.checks.run_startup_checks``
+before starting the worker for actionable environment diagnostics.
+
+Model lifecycle (one Qwen model resident at a time, mirroring notebook cells
+11/17): the Base model stays loaded across clone-prompt/narration jobs; the
+VoiceDesign model is loaded only while a design job runs and then released
+(``del`` + ``gc.collect()`` + ``torch.cuda.empty_cache()``). A single 1.7B
+checkpoint is the safe default on a T4; VRAM budgets beyond that are NOT assumed.
 """
 import base64
-import inspect
 import io
 import logging
-from typing import Any
+import tempfile
+from pathlib import Path
 
 from .backends import InferenceBackend, SynthesisOutput
 from .config import WorkerConfig
@@ -30,7 +37,7 @@ from .prompt import (
 logger = logging.getLogger("qwen-worker")
 
 
-def _wav_bytes(wavs: Any, sr: int) -> bytes:
+def _wav_bytes(wavs, sr: int) -> bytes:
     import soundfile as sf
 
     buffer = io.BytesIO()
@@ -47,7 +54,6 @@ class QwenBackend(InferenceBackend):
         self.config = config
         self._base_model = None
         self._design_model = None
-        self._clone_instruct_probe = None
 
     # ---------- model lifecycle (notebook cells 11/17/19) ----------
     def _load_base(self):
@@ -81,30 +87,42 @@ class QwenBackend(InferenceBackend):
         return self._design_model
 
     def _release_design(self) -> None:
-        """Free the VoiceDesign model from VRAM (notebook cell 17 discipline)."""
-        if self._design_model is not None and not self.config.qwen_keep_design_loaded:
-            import gc
+        """Free the VoiceDesign model from VRAM (notebook cell 17 discipline).
 
-            import torch
+        If ``QWEN_KEEP_DESIGN_LOADED`` is set, the model intentionally stays
+        resident and may coexist with the Base model on later narration jobs;
+        that combination is the operator's explicit choice and is NOT assumed
+        to fit without verification.
+        """
+        if self._design_model is None:
+            return
+        if self.config.qwen_keep_design_loaded:
+            logger.warning(
+                "QWEN_KEEP_DESIGN_LOADED=true keeps VoiceDesign resident; when "
+                "the Base model is later loaded for narration both checkpoints "
+                "share VRAM. Confirm the GPU actually fits both before using this."
+            )
+            return
+        import gc
 
-            logger.info("Releasing VoiceDesign model from GPU")
-            self._design_model = None
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-
-    def _model_device(self):
-        import torch
-
-        return torch.device(self.config.qwen_device)
-
-    # ---------- InferenceBackend ----------
-    def design(self, *, language: str, instruct: str, text: str) -> SynthesisOutput:
-        design_model = self._load_design()
+        logger.info("Releasing VoiceDesign model from GPU")
+        self._design_model = None
+        gc.collect()
         try:
             import torch
 
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except ImportError:  # pragma: no cover - only reached if torch vanished mid-run
+            pass
+
+    # ---------- InferenceBackend ----------
+    def design(self, *, language: str, instruct: str, text: str) -> SynthesisOutput:
+        import torch
+
+        try:
+            design_model = self._load_design()
             with torch.inference_mode():
                 wavs, sr = design_model.generate_voice_design(
                     text=text,
@@ -126,13 +144,21 @@ class QwenBackend(InferenceBackend):
         wav, sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
         if wav.ndim > 1:
             wav = np.mean(wav, axis=-1).astype(np.float32)
-        prompt_items = model.create_voice_clone_prompt(
-            ref_audio=(wav, int(sr)),
-            ref_text=ref_text,
-            x_vector_only_mode=False,
-        )
-        saved = build_saved_prompt(prompt_items[0])
-        return serialize_prompt(saved)
+        # Notebook cell 21 proves the filesystem-path form:
+        #   create_voice_clone_prompt(ref_audio=str(reference_path), ref_text=...)
+        # qwen-tts loads str paths via librosa (native sample rate, mono). Decode
+        # the reference clip to a temp WAV and pass the path rather than a numpy
+        # tuple, exactly matching the proven notebook call.
+        with tempfile.TemporaryDirectory(prefix="qwen-ref-") as tmpdir:
+            ref_path = Path(tmpdir) / "reference.wav"
+            sf.write(ref_path, wav, int(sr), format="WAV")
+            prompt_items = model.create_voice_clone_prompt(
+                ref_audio=str(ref_path),
+                ref_text=ref_text,
+                x_vector_only_mode=False,
+            )
+            saved = build_saved_prompt(prompt_items[0])
+            return serialize_prompt(saved)
 
     def narrate(
         self,
@@ -150,16 +176,15 @@ class QwenBackend(InferenceBackend):
         prompt_item = restore_prompt_item(saved, device)
         prompt_list = [prompt_item]
 
-        clone_kwargs: dict[str, Any] = {}
         if instruct and instruct.strip():
-            clone_kwargs = self._probe_instruct_arg()
-            if "instruct" in clone_kwargs:
-                clone_kwargs["instruct"] = instruct.strip()
-            else:
-                logger.warning(
-                    "Installed generate_voice_clone does not accept `instruct`; "
-                    "delivery direction is preserved (native punctuation/prosody path)."
-                )
+            logger.info(
+                "delivery direction received for narration, but qwen-tts==0.1.1 "
+                "`generate_voice_clone` has no `instruct` parameter, so it is not "
+                "forwarded (an unsupported kwarg would raise TypeError). The "
+                "direction already shaped the reference voice at design time; "
+                "narration prosody follows the native punctuation/paragraph path "
+                "of the Base model (see docs/DEVIATIONS.md §1)."
+            )
 
         outputs: list[SynthesisOutput] = []
         for i, chunk in enumerate(chunks):
@@ -169,7 +194,6 @@ class QwenBackend(InferenceBackend):
                     text=chunk,
                     language=language,
                     voice_clone_prompt=prompt_list,
-                    **clone_kwargs,
                 )
             data = _wav_bytes(wavs[0], sr)
             duration = len(wavs[0]) / sr
@@ -177,14 +201,3 @@ class QwenBackend(InferenceBackend):
                 SynthesisOutput(data, int(sr), round(float(duration), 3))
             )
         return outputs
-
-    def _probe_instruct_arg(self) -> dict[str, Any]:
-        """Forward-compatible capability probe: does generate_voice_clone accept instruct?"""
-        if self._clone_instruct_probe is not None:
-            return {"instruct": ""} if self._clone_instruct_probe else {}
-        model = self._load_base()
-        sig = inspect.signature(model.generate_voice_clone)
-        supports = "instruct" in sig.parameters
-        self._clone_instruct_probe = supports
-        logger.info("generate_voice_clone instruct support: %s", supports)
-        return {"instruct": ""} if supports else {}

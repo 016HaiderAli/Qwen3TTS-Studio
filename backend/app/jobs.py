@@ -6,6 +6,7 @@ API and the backend transitions the `jobs` table rows. No broker is used
 """
 import base64
 import json
+import logging
 import shutil
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from . import audio, storage
 from .config import get_settings
 from .models import Job, Narration, Voice
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
@@ -148,10 +150,19 @@ def complete_job(
         sr, duration = audio.concat_wav_files(
             existing, storage.root() / storage.narration_final_rel(narration.id)
         )
-        if sample_rate is not None:
-            sr = int(sample_rate)
+        # The sample rate parsed from the actual WAV chunks is authoritative for
+        # the final narration; the worker-reported value is recorded for
+        # cross-checking but never trusted over the artifact metadata.
+        if sample_rate is not None and int(sample_rate) != int(sr):
+            logger.warning(
+                "job %s: worker reported sample_rate=%s but the concatenated "
+                "WAV is %d Hz; using the WAV metadata",
+                job.id,
+                sample_rate,
+                sr,
+            )
         narration.final_audio_path = storage.narration_final_rel(narration.id)
-        narration.sample_rate = sr
+        narration.sample_rate = int(sr)
         narration.duration_sec = duration
         narration.status = "ready"
         narration.chunk_durations_json = json.dumps(durations)

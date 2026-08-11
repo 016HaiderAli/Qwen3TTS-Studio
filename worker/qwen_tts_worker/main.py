@@ -1,12 +1,16 @@
 """GPU worker entrypoint.
 
-Usage:
+Usage (run from the repo's ``worker/`` directory so ``qwen_tts_worker`` is
+importable):
+
     python -m qwen_tts_worker.main --backend mock     # no GPU required
     python -m qwen_tts_worker.main --backend qwen     # GPU host + qwen-tts
 
 The worker polls the backend for jobs, dispatches to the configured inference
 backend, uploads artifacts, and reports completion or failure. It processes one
-job at a time (single GPU).
+job at a time (single GPU). For ``--backend qwen`` it first runs the GPU
+environment checks in ``qwen_tts_worker.checks`` and aborts with actionable
+errors if the host cannot run qwen-tts.
 """
 import argparse
 import logging
@@ -15,6 +19,7 @@ import time
 
 import httpx
 
+from . import checks
 from .backends import InferenceBackend, MockBackend
 from .client import WorkerAPIClient, WorkerAPIError
 from .config import WorkerConfig
@@ -131,8 +136,17 @@ def main(argv: list[str] | None = None) -> int:
     if not config.worker_token:
         logger.error("WORKER_TOKEN is required")
         return 2
-    if config.backend == "qwen" and config.requires_gpu:
-        logger.info("backend=qwen requires a CUDA GPU at runtime")
+
+    if config.backend == "qwen":
+        results = checks.run_startup_checks(config)
+        failed = [r for r in results if not r.ok]
+        if failed:
+            logger.error(
+                "GPU worker startup aborted: %d check(s) failed (see above). "
+                "Fix the environment, or use --backend mock for the GPU-less preview flow.",
+                len(failed),
+            )
+            return 3
 
     backend = _build_backend(config)
     client = WorkerAPIClient(config)

@@ -63,19 +63,33 @@ enables the test-only dev login. Never enable `DEV_LOGIN` in production.
 
 ## Real GPU worker
 
-On a CUDA host:
+The real Qwen3-TTS worker needs a CUDA GPU (the reference notebook runs on a
+Google Colab **Tesla T4**) and has **not** been executed in this preview
+environment — GPU validation is deferred to a CUDA-enabled host (see
+`docs/VERIFICATION_REPORT.md`). Run it from the repo's `worker/` directory so
+the package is importable:
 
 ```bash
-pip install -r worker/requirements.txt -r worker/requirements-qwen.txt
+cd worker
+pip install -r requirements.txt -r requirements-qwen.txt
 export BACKEND_URL=http://<backend-host>:8000
 export WORKER_TOKEN=<shared with backend>
 export WORKER_BACKEND=qwen
 python -m qwen_tts_worker.main --backend qwen
 ```
 
+With `--backend qwen` the worker first runs GPU environment checks
+(`qwen_tts_worker/checks.py`): torch/CUDA presence and device, the pinned
+`qwen-tts==0.1.1` version and its required API surface, and the configured
+dtype. It aborts with actionable errors if the host cannot run qwen-tts.
+
 The worker downloads `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` and
-`Qwen/Qwen3-TTS-12Hz-1.7B-Base` (~4.5 GB BF16 each) on first use. See
-`worker/.env.example` for all options (device, dtype, model ids, keep-design-loaded).
+`Qwen/Qwen3-TTS-12Hz-1.7B-Base` on first use. It keeps one Qwen model resident
+at a time: the Base model stays loaded for clone-prompt/narration jobs, while
+the VoiceDesign model is loaded only during a design job and then released
+(mirroring the notebook's `del` + `gc.collect()` + `torch.cuda.empty_cache()`
+discipline). VRAM budgets beyond this one-at-a-time default are not assumed.
+See `worker/.env.example` for all options (device, dtype, model ids, keep-design-loaded).
 
 ## Configuration
 

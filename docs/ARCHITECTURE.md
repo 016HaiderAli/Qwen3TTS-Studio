@@ -36,7 +36,7 @@ All model operations require a **CUDA GPU** (the notebook runs on a Google Colab
 Consequences that shape the architecture:
 
 - The web application **cannot** run inference locally. It must delegate to a GPU worker.
-- GPU worker memory: each 1.7B model requires ~4-5 GB VRAM for weights plus activation/KV-cache headroom. A 16 GB T4 is the demonstrated baseline. The notebook never holds both 1.7B models in memory simultaneously.
+- GPU worker memory: each 1.7B model is roughly ~4-5 GB of weights plus activation/KV-cache headroom (size not measured here). The notebook runs on a T4 and **never holds both 1.7B models in memory simultaneously**; the worker mirrors that one-model-at-a-time discipline. No VRAM budget such as "fits on a 16 GB T4" is claimed — that is verified by the GPU acceptance run, not assumed.
 - Model weights are downloaded from Hugging Face / ModelScope on first use; the GPU host must have network access and ~9-10 GB of free disk for both checkpoints.
 
 ---
@@ -143,7 +143,7 @@ Every operation that touches model weights or does inference **must run on a CUD
 
 CPU-only work (safe on the web tier): text validation, chunking, WAV I/O with `soundfile`, numpy concatenation, metadata (sample rate, duration), serving audio files, and all web/DB/storage logic.
 
-GPU memory plan (mirrors notebook): keep the Base model resident for clone-prompt creation and narration. Load the VoiceDesign model only while processing a design job, then release it (`del` + `gc.collect()` + `torch.cuda.empty_cache()`), exactly as notebook cells 11 and 17 do. On a 16 GB T4 both models fit simultaneously (~8-9 GB weights), but the notebook discipline of one-at-a-time remains the safe default and the documented fallback for smaller GPUs.
+GPU memory plan (mirrors notebook): keep the Base model resident for clone-prompt creation and narration. Load the VoiceDesign model only while processing a design job, then release it (`del` + `gc.collect()` + `torch.cuda.empty_cache()`), exactly as notebook cells 11 and 17 do. The worker therefore keeps **one 1.7B checkpoint resident at a time**; this is the safe default on a T4 and the only plan validated by the notebook. Holding both models simultaneously is not assumed to fit any specific GPU and is not claimed here — the GPU acceptance run is the source of truth for actual VRAM headroom.
 
 ---
 

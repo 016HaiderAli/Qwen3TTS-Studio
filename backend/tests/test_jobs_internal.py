@@ -2,7 +2,7 @@
 from app import jobs as job_service
 from app import storage
 from app.db import SessionLocal
-from app.models import Voice
+from app.models import Narration, Voice
 
 WORKER_AUTH = {"Authorization": "Bearer test-worker-token"}
 
@@ -122,9 +122,9 @@ def test_complete_rejects_non_running_job(client, dev_login):
     assert resp.status_code == 409
 
 
-def test_narration_chunk_field_validation(client, dev_login):
+def _enqueue_narration_job(dev_login, script="Hi.", chunks=("Hi.",)):
+    """Create an approved voice + narration and a queued narration job."""
     dev_login("alice@example.com")
-    # enqueue a fake narration job directly (contract-level check)
     with SessionLocal() as db:
         from sqlalchemy import select
 
@@ -142,19 +142,22 @@ def test_narration_chunk_field_validation(client, dev_login):
         narration = Narration(
             owner_id=user.id,
             voice_id=voice.id,
-            script="Hi.",
-            chunks_json='["Hi."]',
+            script=script,
+            chunks_json=str(list(chunks)),
         )
         db.add(narration)
         db.flush()
         job = job_service.enqueue(
             db, user.id, "narration",
-            {"chunks": ["Hi."], "narration_id": narration.id},
+            {"chunks": list(chunks), "narration_id": narration.id},
             voice_id=voice.id, narration_id=narration.id,
         )
         db.commit()
-        job_id = job.id
+        return job.id, narration.id
 
+
+def test_narration_chunk_field_validation(client, dev_login):
+    job_id, _ = _enqueue_narration_job(dev_login)
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     assert claim["job_id"] == job_id
 
@@ -165,3 +168,44 @@ def test_narration_chunk_field_validation(client, dev_login):
         files={"file": ("c.wav", b"", "application/octet-stream")},
     )
     assert resp.status_code == 422
+
+
+def test_narration_complete_uses_wav_sample_rate_as_authoritative(
+    client, dev_login, make_wav_bytes
+):
+    """The final narration's sample rate is parsed from the actual WAV chunks,
+    never trusted from the worker's reported value."""
+    job_id, narration_id = _enqueue_narration_job(dev_login)
+    claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    assert claim["job_id"] == job_id
+
+    chunk_wav = make_wav_bytes(sr=16000, seconds=0.5)
+    resp = client.post(
+        f"/internal/jobs/{job_id}/artifact",
+        headers=WORKER_AUTH,
+        data={"field": "chunk_0"},
+        files={"file": ("c.wav", chunk_wav, "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+
+    # The worker claims 24000 Hz, but the actual artifact is 16000 Hz.
+    resp = client.post(
+        f"/internal/jobs/{job_id}/complete",
+        headers=WORKER_AUTH,
+        json={"sample_rate": 24000, "durations": [0.5]},
+    )
+    assert resp.status_code == 200
+
+    with SessionLocal() as db:
+        narration = db.get(Narration, narration_id)
+        assert narration.status == "ready"
+        assert narration.sample_rate == 16000
+        assert narration.duration_sec == 0.5
+
+    # The final file is playable at the authoritative rate.
+    audio = client.get(f"/api/files/narrations/{narration_id}/audio")
+    assert audio.status_code == 200
+    assert audio.content[:4] == b"RIFF"
+    import struct
+
+    assert struct.unpack("<I", audio.content[24:28])[0] == 16000

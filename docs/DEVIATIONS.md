@@ -29,16 +29,20 @@ on the current public API without raising `TypeError`.
   `generate_voice_design` is composed from the user's voice description plus the delivery
   direction, so the resulting reference voice embodies the requested delivery. This is the
   demonstrated instruction-control capability.
-- **Narration generation** preserves punctuation and paragraph structure verbatim when
-  passing each chunk to `generate_voice_clone`. This is the Base model's documented native
-  expressive path ("adaptive control of tone, speaking rate, and emotional expression based
-  on ... text semantics"; robust handling of punctuation/pauses). Paragraph boundaries are
-  preserved inside chunks with blank-line separators (notebook cells 46/55 flatten them;
-  see deviation 2).
-- The real GPU worker performs a **capability probe** on the installed
-  `generate_voice_clone`: if a future `qwen-tts` version exposes an instruction parameter,
-  the delivery direction is forwarded to it. If not, the direction is logged and the native
-  prosody path is used. The worker never passes an unsupported keyword argument.
+- **Narration generation** does **not** pass `instruct` to `generate_voice_clone`: the
+  `qwen-tts==0.1.1` signature has no such parameter, and forwarding it through `**kwargs`
+  would reach `transformers.generate` and raise `TypeError`. The worker logs the direction
+  and preserves punctuation and paragraph structure verbatim when passing each chunk to
+  `generate_voice_clone`. This is the Base model's documented native expressive path
+  ("adaptive control of tone, speaking rate, and emotional expression based on ... text
+  semantics"; robust handling of punctuation/pauses). Paragraph boundaries are preserved
+  inside chunks with blank-line separators (notebook cells 46/55 flatten them; see
+  deviation 2). The earlier capability probe (which would have forwarded `instruct` from a
+  hypothetical future API) was removed: the dependency is pinned to `qwen-tts==0.1.1`, and
+  startup checks fail fast on any other version rather than silently diverging.
+- The `instruct` field is retained in the narration data model, job payload, worker
+  interface, and UI so a future `qwen-tts` release that exposes per-utterance instruction
+  injection can be wired up without web-tier changes.
 - The mock worker consumes and records the delivery direction, proving the end-to-end
   plumbing that the real worker will use.
 - The UI labels the field truthfully ("Delivery / Voice Direction") and states that
@@ -73,7 +77,10 @@ endpoints and also cover real session handling.
 
 The mock worker emits deterministic tone WAVs (no `qwen-tts`, no GPU, no torch). It honors
 the exact internal HTTP contract the real worker uses, including reporting `sample_rate`
-per job (the backend stores whatever the worker reports and never assumes a fixed rate).
+per job. The backend records the worker's reported rate for cross-checking but treats the
+sample rate parsed from the actual uploaded WAV chunks as **authoritative** for the final
+narration (a mismatch is logged, never trusted) — see `backend/app/jobs.py` and the
+sample-rate-authority test in `backend/tests/test_jobs_internal.py`.
 
 ## 5. Session cookie naming and hash-at-rest
 
@@ -89,3 +96,35 @@ few MB, acceptable for the internal API. Artifact uploads (per-chunk WAVs, and t
 preview WAV) use a single generic endpoint `POST /internal/jobs/{id}/artifact` with a
 `field` parameter (`reference_audio`, `prompt_pt`, `chunk_<i>`), which refines the
 `/internal/jobs/{id}/chunks` endpoint sketched in `docs/MVP_ARCHITECTURE.md` §3.3.
+
+## 7. Reference audio passed to `create_voice_clone_prompt` as a temp-file path
+
+**Verified fact (primary source):** the notebook (cell 21) calls
+`clone_model.create_voice_clone_prompt(ref_audio=str(reference_path), ref_text=...)` —
+the filesystem-path form, which `qwen-tts 0.1.1` loads via `librosa.load` (native sample
+rate, mono). An `(np.ndarray, sr)` tuple is also supported by the API, but the path form is
+the notebook-proven call.
+
+**Resolution:** the GPU worker decodes the base64 reference clip to a temp WAV file and
+passes `ref_audio=str(temp_path)`, exactly mirroring the notebook. This avoids the worker
+having to reproduce `librosa`'s mono/resample behavior itself.
+
+## 8. GPU-worker startup validation
+
+The real worker (`--backend qwen`) runs `worker/qwen_tts_worker/checks.py` before polling:
+torch presence, CUDA availability/device index, the pinned `qwen-tts==0.1.1` version and
+its required API surface, and dtype validity. Failures are reported with actionable
+messages and the worker exits with a non-zero code. This was added so a misconfigured GPU
+host fails fast with a clear message instead of crashing later inside `from_pretrained`.
+`qwen-tts==0.1.1` is the pinned, notebook-installed version; `transformers==4.57.3` and
+`accelerate==1.12.0` are pinned because `qwen-tts==0.1.1` requires those exact versions
+(evidence: notebook cell 7 install output).
+
+## 9. One Qwen model resident at a time (VRAM not assumed)
+
+The worker loads the Base model once for clone-prompt/narration jobs and loads the
+VoiceDesign model only during a design job, then releases it with
+`del` + `gc.collect()` + `torch.cuda.empty_cache()` (notebook cell 17 discipline). The
+default `QWEN_KEEP_DESIGN_LOADED=false` means both 1.7B checkpoints are never held
+simultaneously. No VRAM budget (e.g. "fits on a 16 GB T4") is claimed anywhere: that
+remains unvalidated until the real GPU acceptance run.

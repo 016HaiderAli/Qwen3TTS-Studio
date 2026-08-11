@@ -4,7 +4,20 @@ Date: 2026-08-11
 
 This report records exactly what was verified for the Voice Studio MVP and what
 still requires a real GPU host. It follows the test/verification plan in
-`docs/MVP_ARCHITECTURE.md` §3.8.
+`docs/MVP_ARCHITECTURE.md` §3.8 and separates every claim by provenance.
+
+## Provenance categories
+
+- **(A) Notebook-proven** — behavior taken directly from
+  `reference/Voice_Studio.ipynb` (cells cited) and/or the pinned `qwen-tts==0.1.1`
+  source; trustworthy as the model API contract.
+- **(B) Verified here (CPU / mock worker)** — executed and passed in this
+  environment's test suites, lint, type check, production build, and a live
+  uvicorn + mock-worker + Vite run.
+- **(C) Implemented, not GPU-validated** — code written to the (A) contract but
+  not executable here (no CUDA, no torch, no qwen-tts). Requires a CUDA host.
+- **(D) Not supported by `qwen-tts==0.1.1`** — requested feature that the pinned
+  API does not provide; handled as a documented limitation.
 
 ## Environment
 
@@ -12,12 +25,30 @@ still requires a real GPU host. It follows the test/verification plan in
 - Python 3.11, Node 22, SQLite, local filesystem storage.
 - A single exposed port; the Vite dev server proxies `/api` and `/auth` to FastAPI.
 
-## Validated (mock worker, no GPU)
+## What is (A) notebook-proven / (D) unsupported
 
-All of the following passed in this environment:
+- `create_voice_clone_prompt(ref_audio=str(path), ref_text=...)` — filesystem-path
+  form (notebook cell 21). The worker passes a decoded temp-WAV path, not a numpy
+  tuple (DEVIATIONS §7).
+- Prompt persistence schema (notebook cells 25/27): `icl_mode`, `ref_code (108,16)`,
+  `ref_spk_embedding (2048,)`, `ref_text: str`, `x_vector_only_mode`; `torch.save` /
+  `torch.load(weights_only=True)`; restored as `VoiceClonePromptItem` (cell 29).
+- `generate_voice_design(text, language, instruct)` (cell 15) and
+  `generate_voice_clone(text, language, voice_clone_prompt=...)` under
+  `torch.inference_mode()` (cell 32/36), returning `(wavs, sample_rate)`.
+- **(D)** `generate_voice_clone` has **no `instruct` parameter** in `qwen-tts==0.1.1`
+  (verified in the packaged source). Delivery direction therefore shapes the
+  reference voice at design time and otherwise uses the Base model's native
+  punctuation/paragraph path; it is never forwarded to the narration call
+  (DEVIATIONS §1).
+- Version evidence: notebook cell 7 installed `qwen-tts 0.1.1`, which pins
+  `transformers==4.57.3` and `accelerate==1.12.0`; cell 9 reports PyTorch
+  `2.11.0+cu128`, Python 3.12, NVIDIA **Tesla T4**, `flash-attn` absent. These are
+  documented in `worker/requirements-qwen.txt`.
 
-### Backend test suite — `python -m pytest backend/tests`
-60 tests passed. Coverage:
+## Validated here — (B) backend test suite
+
+`python -m pytest backend/tests` — **84 tests passed**. Coverage:
 
 - **Chunking** (`test_chunking.py`): notebook port — paragraph/sentence splitting,
   greedy 80-word packing, >80-word scripts, empty-script rejection, and the
@@ -37,27 +68,37 @@ All of the following passed in this environment:
   with wrong token), design lifecycle (claim → invalid WAV 422 → valid WAV upload →
   complete → `preview_ready` + streamable reference), fail→retry→failed with
   `voice` returning to `draft`, completing a non-running job → 409, chunk-field
-  validation.
+  validation, and **sample-rate authority**: when a worker reports a rate that
+  contradicts the uploaded WAV artifacts, the stored narration rate is parsed from
+  the WAV (authoritative) and the mismatch is logged.
 - **Worker client** (`test_worker_client.py`): poll/204, poll claim, upload
   multipart shape, complete/fail bodies, error propagation.
-- **Prompt schema** (`test_prompt_schema.py`): cell-25 dict contract
-  (`icl_mode`, `ref_code (108,16)`, `ref_spk_embedding (2048,)`, `ref_text`,
-  `x_vector_only_mode`), lazy torch import (ImportError when torch is absent).
+- **Prompt schema** (`test_prompt_schema.py`): cell-25 dict contract with strict
+  shape/type validation (`ref_code` exactly `(108,16)`, `ref_spk_embedding` exactly
+  `(2048,)`, bool flags, `ref_text` str when ICL mode), version-constant evidence,
+  lenient mode for future versions, lazy torch import (ImportError when torch is
+  absent).
+- **GPU startup checks** (`test_startup_checks.py`): every `checks.py` diagnostic —
+  missing torch, CUDA unavailable, bad/missing device index, missing/wrong
+  `qwen-tts` version, incomplete API surface, invalid/non-float dtype, and an
+  all-green `run_startup_checks` + `require_ok`.
 - **Mock-worker E2E** (`test_mock_worker_e2e.py`): full flow via the internal HTTP
   contract — login → create voice → design → preview_ready → approve → approved →
   narrate (single- and multi-chunk, with delivery direction, with paragraph breaks)
   → ready narration with sample rate + duration + downloadable WAV; per-chunk
   progress reported through the user-facing job endpoint.
 
-### Frontend — `npm --prefix frontend test` (9 passed), `lint`, `build`
-- API client behavior (success, 401 → ApiError, error-detail surfacing, 204, same-origin
-  credentials).
-- Login page: redirects to the Google authorization URL; graceful error when Google
-  is unconfigured.
-- Status badge labels.
-- `tsc --noEmit` type check and production `vite build` both clean.
+## Validated here — (B) frontend
 
-### Live integration (real uvicorn + mock worker over HTTP)
+- `npm --prefix frontend test` (9 passed): API client behavior (success, 401 →
+  ApiError, error-detail surfacing, 204, same-origin credentials); login page
+  (redirect to Google authorization URL, graceful error when Google is
+  unconfigured); status badge labels.
+- `npm --prefix frontend run lint`, `tsc --noEmit` type check, and production
+  `vite build` all clean.
+
+## Validated here — (B) live integration (real uvicorn + mock worker over HTTP)
+
 A live run against `uvicorn` on `:8000` with the mock worker and the Vite dev
 server on `:5173`:
 
@@ -91,27 +132,37 @@ server on `:5173`:
 - The web tier never receives worker credentials, and the worker never receives
   DB/storage/OAuth credentials (byte-passing boundary).
 
-## NOT validated here — requires a real GPU host
+## (C) Implemented, NOT validated here — requires a real GPU host
 
-The **real Qwen3-TTS backend** (`worker/qwen_tts_worker/qwen_backend.py`) is
-written to mirror the proven notebook workflow but could not be executed in this
-CPU-only environment. The following are therefore unvalidated in this report:
+The **real Qwen3-TTS backend** (`worker/qwen_tts_worker/qwen_backend.py` and the
+startup checks in `checks.py`) is written to mirror the (A) notebook contract but
+could not be executed in this CPU-only environment. The following are therefore
+**unvalidated** until the GPU acceptance run:
 
 - Model downloads (`Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign`, `-Base`) and exact
-  `from_pretrained(device_map, dtype)` signatures under `qwen-tts 0.1.1`.
+  `from_pretrained(device_map, dtype)` behavior under `qwen-tts 0.1.1` with
+  PyTorch 2.11+ / bfloat16 on a Tesla T4.
 - `generate_voice_design(text, language, instruct)` output on real models.
-- `create_voice_clone_prompt(ref_audio=(wav, sr), ref_text)` → cell-25 dict →
-  `torch.save` → `torch.load(weights_only=True)` round-trip → `VoiceClonePromptItem`.
-- Per-chunk `generate_voice_clone` under `torch.inference_mode()` and the
-  capability probe that forwards `instruct` only if the installed API supports it.
-- GPU VRAM management (design model released after use, base model kept resident).
+- Temp-file path form of `create_voice_clone_prompt` → cell-25 dict → `torch.save`
+  → `torch.load(weights_only=True)` round-trip → `VoiceClonePromptItem` → per-chunk
+  `generate_voice_clone` under `torch.inference_mode()`.
+- GPU VRAM behavior of the one-model-at-a-time lifecycle (design released after
+  use, base kept resident). **No VRAM budget (e.g. "fits on a 16 GB T4") is
+  claimed** — it is verified only by this acceptance run.
+- The startup checks on a real CUDA host (their failure paths are unit-tested here;
+  their CUDA-specific branches run only on real hardware).
+- End-to-end delivery direction effect on real narration (design-time `instruct` +
+  native prosody path).
 
 ### Recommended GPU acceptance steps (on the user's GPU host/Colab)
-1. Install `worker/requirements.txt` + `worker/requirements-qwen.txt`.
+1. Install `worker/requirements.txt` + `worker/requirements-qwen.txt`
+   (`qwen-tts==0.1.1`, `transformers==4.57.3`, `accelerate==1.12.0`; CUDA-enabled
+   torch matching the host).
 2. Run the notebook cells 1–28 of `reference/Voice_Studio.ipynb` to confirm the
-   environment matches the notebook.
+   environment matches the notebook (T4, PyTorch 2.11+, bfloat16).
 3. Start the backend with a real `WORKER_TOKEN`, then run
-   `python -m qwen_tts_worker.main --backend qwen`.
+   `cd worker && python -m qwen_tts_worker.main --backend qwen`; confirm the
+   startup checks pass.
 4. Re-run the live E2E flow and confirm real WAV output (compare against the
    notebook's golden outputs).
 5. If any `qwen-tts` API detail differs, adjust `worker/qwen_tts_worker/qwen_backend.py`
@@ -121,8 +172,9 @@ CPU-only environment. The following are therefore unvalidated in this report:
 
 - Google real login requires user-supplied OAuth credentials (documented in
   `docs/DEVIATIONS.md` §3).
-- Narration delivery direction is applied natively (design `instruct` +
-  punctuation/paragraph preservation + worker capability probe), per
+- Narration delivery direction is applied at design time (`instruct` on
+  `generate_voice_design`) plus native punctuation/paragraph preservation on
+  narration; `qwen-tts==0.1.1` has no per-utterance `instruct` parameter (D) — see
   `docs/DEVIATIONS.md` §1; the UI does not claim unsupported per-utterance
   instruction injection.
 - `docs/MVP_ARCHITECTURE.md` §3.3 specifies `POST /internal/jobs/{id}/chunks`;
