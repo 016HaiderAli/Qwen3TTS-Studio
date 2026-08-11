@@ -1,0 +1,10 @@
+# GPU worker dependencies (Qwen3-TTS real inference). Install on the CUDA GPU
+# host together with requirements.txt. NOT installed in the dev environment.
+# See reference/Voice_Studio.ipynb for the proven workflow.
+# NOTE: qwen-tts 0.1.1 is the latest release and the notebook-installed version.
+torch>=2.4
+transformers>=4.45
+soundfile>=0.12
+numpy>=1.26
+sentencepiece>=0.2
+qwen-tts==0.1.1

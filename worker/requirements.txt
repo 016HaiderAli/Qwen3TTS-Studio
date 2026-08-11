@@ -1,0 +1,7 @@
+# Worker dependencies required for the mock backend and the worker runtime.
+# GPU dependencies (torch, qwen-tts) live in requirements-qwen.txt.
+httpx>=0.27,<1
+
+# Run the worker:
+#   pip install -r requirements.txt
+#   python -m qwen_tts_worker.main --backend mock
