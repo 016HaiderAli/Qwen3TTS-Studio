@@ -5,8 +5,9 @@ cells 25, 27 and 29:
 
     saved_prompt = {
         "icl_mode": bool,
-        "ref_code": torch.Tensor(108, 16),          # CPU, detached
-        "ref_spk_embedding": torch.Tensor(2048,),   # CPU, detached
+        "ref_code": torch.Tensor(T, 16),          # CPU, detached; T = number of
+                                                  # reference-audio code frames
+        "ref_spk_embedding": torch.Tensor(2048,), # CPU, detached
         "ref_text": str,
         "x_vector_only_mode": bool,
     }
@@ -14,12 +15,14 @@ cells 25, 27 and 29:
 saved via torch.save and restored via
 ``qwen_tts.inference.qwen3_tts_model.VoiceClonePromptItem``.
 
-The tensor shapes (108, 16) and (2048,) are specific to the 12 Hz tokenizer of
-qwen-tts==0.1.1, the pinned, notebook-installed version
-(reference/Voice_Studio.ipynb cell 7). Validation is strict by default so a
-corrupt or version-mismatched prompt is rejected before it reaches the model;
-pass ``strict_shapes=False`` only if a future qwen-tts version changes the
-shapes.
+The structure is specific to the 12 Hz tokenizer of qwen-tts==0.1.1, the
+pinned, notebook-installed version (reference/Voice_Studio.ipynb cell 7):
+ref_code is 2D ``(T, 16)`` with one column per quantizer (16) and T code frames
+that grow with the reference-audio duration (T = ceil(valid 24 kHz samples /
+1920)); ref_spk_embedding is a fixed ``(2048,)`` speaker embedding. Validation
+enforces this structure by default so a corrupt or version-mismatched prompt is
+rejected before it reaches the model; pass ``strict_shapes=False`` only if a
+future qwen-tts version changes the shapes.
 
 torch is imported lazily so this module can be imported (and structurally
 tested) without torch installed.
@@ -35,8 +38,11 @@ EXPECTED_KEYS = (
     "x_vector_only_mode",
 )
 
-# Shapes proven by notebook cell 27 for the qwen-tts==0.1.1 12 Hz tokenizer.
-REF_CODE_SHAPE = (108, 16)
+# The qwen-tts==0.1.1 12 Hz tokenizer uses num_quantizers=16 (the second
+# dimension of ref_code). The first dimension T is the number of reference-audio
+# code frames and is duration-dependent (T = ceil(valid 24 kHz samples / 1920)),
+# so only the structure below is validated.
+REF_CODE_QUANTIZERS = 16
 REF_SPK_EMBEDDING_SHAPE = (2048,)
 SCHEMA_VERSION = "qwen-tts==0.1.1 (Qwen3-TTS-12Hz tokenizer)"
 
@@ -105,7 +111,9 @@ def validate_saved_prompt(saved_prompt: dict, *, strict_shapes: bool = True) -> 
     """Validate a saved prompt dict against the notebook cell-25 contract.
 
     With ``strict_shapes=True`` (default) tensor shapes must match the
-    qwen-tts==0.1.1 12 Hz tokenizer exactly. Types are always checked.
+    qwen-tts==0.1.1 12 Hz tokenizer structure: ref_code is 2D ``(T, 16)`` with
+    T >= 1 (duration-dependent frame count) and ref_spk_embedding is
+    ``(2048,)``. Types are always checked.
     """
     if not isinstance(saved_prompt, dict):
         raise ValueError("saved prompt must be a dict")
@@ -123,10 +131,22 @@ def validate_saved_prompt(saved_prompt: dict, *, strict_shapes: bool = True) -> 
     if shape_ref is None:
         raise ValueError("ref_code must be a tensor with a shape")
     if strict_shapes:
-        if shape_ref != REF_CODE_SHAPE:
+        if len(shape_ref) != 2:
             raise ValueError(
-                f"ref_code shape mismatch: got {shape_ref}, expected "
-                f"{REF_CODE_SHAPE} for {SCHEMA_VERSION}"
+                f"ref_code must be 2D (T, {REF_CODE_QUANTIZERS}) with the first "
+                f"dimension equal to the reference-audio code-frame count, got "
+                f"{shape_ref} for {SCHEMA_VERSION}"
+            )
+        if shape_ref[1] != REF_CODE_QUANTIZERS:
+            raise ValueError(
+                f"ref_code must have {REF_CODE_QUANTIZERS} quantizer columns "
+                f"(qwen-tts 12 Hz tokenizer), got {shape_ref} for "
+                f"{SCHEMA_VERSION}"
+            )
+        if shape_ref[0] < 1:
+            raise ValueError(
+                f"ref_code must have at least one code frame, got {shape_ref} "
+                f"for {SCHEMA_VERSION}"
             )
     elif len(shape_ref) != 2:
         raise ValueError(f"ref_code must be 2D, got {shape_ref}")

@@ -34,8 +34,9 @@ def test_torch_lazy_import():
 
 
 def test_schema_version_constants_match_notebook():
-    # Notebook cell 27 asserts these exact shapes for qwen-tts==0.1.1.
-    assert prompt_mod.REF_CODE_SHAPE == (108, 16)
+    # The qwen-tts==0.1.1 12 Hz tokenizer uses 16 quantizers; ref_code is
+    # (T, 16) with the frame count T duration-dependent (real T4 run: 107).
+    assert prompt_mod.REF_CODE_QUANTIZERS == 16
     assert prompt_mod.REF_SPK_EMBEDDING_SHAPE == (2048,)
     assert prompt_mod.SCHEMA_VERSION.startswith("qwen-tts==0.1.1")
 
@@ -44,14 +45,36 @@ def test_validate_saved_prompt_accepts_correct_schema():
     prompt_mod.validate_saved_prompt(_saved())  # should not raise
 
 
+@pytest.mark.parametrize("frames", [107, 108, 2048])
+def test_validate_saved_prompt_accepts_duration_dependent_ref_code(frames):
+    # T grows with the reference-audio duration; any T >= 1 with 16 columns is
+    # a valid ref_code (107 is what the real T4 run produced).
+    prompt_mod.validate_saved_prompt(_saved(ref_code=_FakeTensor((frames, 16))))
+
+
 def test_validate_saved_prompt_missing_key():
     with pytest.raises(ValueError, match="missing key"):
         prompt_mod.validate_saved_prompt({"icl_mode": False})
 
 
-def test_validate_saved_prompt_rejects_bad_ref_code_shape():
-    with pytest.raises(ValueError, match=r"ref_code shape mismatch.*\(108,\)"):
+def test_validate_saved_prompt_rejects_1d_ref_code():
+    with pytest.raises(ValueError, match="ref_code must be 2D"):
         prompt_mod.validate_saved_prompt(_saved(ref_code=_FakeTensor((108,))))
+
+
+def test_validate_saved_prompt_rejects_3d_ref_code():
+    with pytest.raises(ValueError, match="ref_code must be 2D"):
+        prompt_mod.validate_saved_prompt(_saved(ref_code=_FakeTensor((1, 108, 16))))
+
+
+def test_validate_saved_prompt_rejects_zero_length_ref_code():
+    with pytest.raises(ValueError, match="at least one code frame"):
+        prompt_mod.validate_saved_prompt(_saved(ref_code=_FakeTensor((0, 16))))
+
+
+def test_validate_saved_prompt_rejects_wrong_quantizer_count():
+    with pytest.raises(ValueError, match="quantizer columns"):
+        prompt_mod.validate_saved_prompt(_saved(ref_code=_FakeTensor((108, 32))))
 
 
 def test_validate_saved_prompt_rejects_bad_ref_spk_shape():
@@ -61,10 +84,10 @@ def test_validate_saved_prompt_rejects_bad_ref_spk_shape():
         )
 
 
-def test_validate_saved_prompt_lenient_mode_allows_2d_ref_code():
-    # Future qwen-tts versions may change shapes; lenient mode only checks rank.
+def test_validate_saved_prompt_lenient_mode_allows_structurally_different_ref_code():
+    # Future qwen-tts versions may change dimensions; lenient mode only checks rank.
     prompt_mod.validate_saved_prompt(
-        _saved(ref_code=_FakeTensor((2048, 16))), strict_shapes=False
+        _saved(ref_code=_FakeTensor((108, 32))), strict_shapes=False
     )
 
 
