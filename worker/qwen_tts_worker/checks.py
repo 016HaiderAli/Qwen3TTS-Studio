@@ -7,6 +7,7 @@ qwen-tts, incompatible qwen-tts version, bad device/dtype).
 Importing this module must NOT import torch or qwen-tts, so the mock path stays
 GPU-free. The ``_import_*`` helpers are monkeypatchable in tests.
 """
+import importlib.metadata
 import logging
 import re
 from dataclasses import dataclass
@@ -109,9 +110,23 @@ def check_device_index(config) -> CheckResult:
     )
 
 
+def _qwen_dist_version() -> str | None:
+    """Return the installed qwen-tts distribution version, or None.
+
+    The qwen-tts==0.1.1 wheel does not set a usable ``qwen_tts.__version__``
+    attribute (its ``__init__.py`` lists ``__version__`` in ``__all__`` without
+    assigning it), so the version is read from the installed distribution
+    metadata instead.
+    """
+    try:
+        return importlib.metadata.version("qwen-tts")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def check_qwen_installed() -> CheckResult:
     try:
-        qwen_tts, _ = _import_qwen()
+        _import_qwen()
     except ImportError as exc:
         return CheckResult(
             "qwen-tts",
@@ -119,7 +134,7 @@ def check_qwen_installed() -> CheckResult:
             f"qwen-tts is not installed ({exc}). Install "
             "worker/requirements-qwen.txt (pins qwen-tts==0.1.1).",
         )
-    version = getattr(qwen_tts, "__version__", None) or "unknown"
+    version = _qwen_dist_version() or "unknown"
     if version != PINNED_QWEN_TTS_VERSION:
         return CheckResult(
             "qwen-tts",

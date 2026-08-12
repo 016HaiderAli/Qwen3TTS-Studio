@@ -3,6 +3,7 @@
 torch and qwen-tts are not installed here; each test injects lightweight fakes
 or simulates import failures via the monkeypatchable ``_import_*`` helpers.
 """
+import importlib.metadata
 import types
 
 import pytest
@@ -18,8 +19,9 @@ def _fake_torch(**attrs):
     return fake
 
 
-def _fake_qwen(version="0.1.1", model_cls=None):
-    qwen = types.SimpleNamespace(__version__=version)
+def _fake_qwen(model_cls=None):
+    # Mirrors qwen-tts==0.1.1: the package module does not expose __version__.
+    qwen = types.SimpleNamespace()
     if model_cls is None:
         model_cls = types.SimpleNamespace(
             from_pretrained=lambda **k: None,
@@ -97,8 +99,9 @@ def test_qwen_missing_fails(monkeypatch):
 
 
 def test_qwen_version_mismatch_fails(monkeypatch):
-    qwen, _ = _fake_qwen(version="9.9.9")
+    qwen, _ = _fake_qwen()
     monkeypatch.setattr(checks, "_import_qwen", lambda: (qwen, _))
+    monkeypatch.setattr(checks, "_qwen_dist_version", lambda: "9.9.9")
     result = checks.check_qwen_installed()
     assert result.ok is False
     assert "9.9.9" in result.message
@@ -106,15 +109,48 @@ def test_qwen_version_mismatch_fails(monkeypatch):
 
 
 def test_qwen_pinned_version_passes(monkeypatch):
-    qwen, _ = _fake_qwen(version="0.1.1")
+    qwen, _ = _fake_qwen()
     monkeypatch.setattr(checks, "_import_qwen", lambda: (qwen, _))
+    monkeypatch.setattr(checks, "_qwen_dist_version", lambda: "0.1.1")
     result = checks.check_qwen_installed()
     assert result.ok is True
 
 
+def test_qwen_pinned_version_accepted_without_pkg_version_attr(monkeypatch):
+    """qwen-tts==0.1.1 installs without qwen_tts.__version__; dist metadata decides."""
+    qwen, _ = _fake_qwen()
+    assert not hasattr(qwen, "__version__")
+    monkeypatch.setattr(checks, "_import_qwen", lambda: (qwen, _))
+    monkeypatch.setattr(checks, "_qwen_dist_version", lambda: "0.1.1")
+    result = checks.check_qwen_installed()
+    assert result.ok is True
+
+
+def test_qwen_importable_but_metadata_missing_fails(monkeypatch):
+    qwen, _ = _fake_qwen()
+    monkeypatch.setattr(checks, "_import_qwen", lambda: (qwen, _))
+    monkeypatch.setattr(checks, "_qwen_dist_version", lambda: None)
+    result = checks.check_qwen_installed()
+    assert result.ok is False
+    assert "unknown" in result.message
+
+
+def test_qwen_dist_version_reads_dist_metadata(monkeypatch):
+    monkeypatch.setattr(checks.importlib.metadata, "version", lambda _name: "0.1.1")
+    assert checks._qwen_dist_version() == "0.1.1"
+
+
+def test_qwen_dist_version_none_when_package_not_found(monkeypatch):
+    def _raise(_name):
+        raise importlib.metadata.PackageNotFoundError("qwen-tts")
+
+    monkeypatch.setattr(checks.importlib.metadata, "version", _raise)
+    assert checks._qwen_dist_version() is None
+
+
 def test_api_capabilities_missing_method_fails(monkeypatch):
-    _, model = _fake_qwen(model_cls=types.SimpleNamespace(from_pretrained=lambda **k: None))
-    monkeypatch.setattr(checks, "_import_qwen", lambda: (types.SimpleNamespace(__version__="0.1.1"), model))
+    model = types.SimpleNamespace(from_pretrained=lambda **k: None)
+    monkeypatch.setattr(checks, "_import_qwen", lambda: (types.SimpleNamespace(), model))
     result = checks.check_api_capabilities()
     assert result.ok is False
     assert "generate_voice_clone" in result.message
@@ -171,6 +207,7 @@ def test_run_startup_checks_all_green(monkeypatch):
     monkeypatch.setattr(checks, "_import_torch", lambda: torch_fake)
     qwen, model = _fake_qwen()
     monkeypatch.setattr(checks, "_import_qwen", lambda: (qwen, model))
+    monkeypatch.setattr(checks, "_qwen_dist_version", lambda: "0.1.1")
 
     results = checks.run_startup_checks(WorkerConfig(backend="qwen"))
     assert all(r.ok for r in results)
