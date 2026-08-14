@@ -20,6 +20,9 @@ os.environ["COOKIE_SECURE"] = "0"
 os.environ["GOOGLE_CLIENT_ID"] = "test-client-id"
 os.environ["GOOGLE_CLIENT_SECRET"] = "test-client-secret"
 os.environ["GOOGLE_REDIRECT_URI"] = "http://testserver/auth/callback"
+# Test suite runs the mock worker intentionally: web-tier jobs are tagged
+# "mock" so the mock worker (declaring X-Worker-Backend: mock) can claim them.
+os.environ["DEFAULT_JOB_BACKEND"] = "mock"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "worker"))

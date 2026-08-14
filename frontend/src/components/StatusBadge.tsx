@@ -2,6 +2,7 @@ const LABELS: Record<string, string> = {
   draft: 'Draft',
   designing: 'Designing…',
   preview_ready: 'Preview ready',
+  approving: 'Approving…',
   approved: 'Approved',
   queued: 'Queued',
   running: 'Processing…',

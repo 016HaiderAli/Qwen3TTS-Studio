@@ -8,6 +8,11 @@ describe('StatusBadge', () => {
     expect(screen.getByText('Preview ready')).toBeInTheDocument()
   })
 
+  it('renders the approving label', () => {
+    render(<StatusBadge status="approving" />)
+    expect(screen.getByText('Approving…')).toBeInTheDocument()
+  })
+
   it('falls back to the raw status for unknown values', () => {
     render(<StatusBadge status="weird" />)
     expect(screen.getByText('weird')).toBeInTheDocument()

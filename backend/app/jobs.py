@@ -62,6 +62,7 @@ def enqueue(
     payload: dict,
     voice_id: str | None = None,
     narration_id: str | None = None,
+    required_backend: str | None = None,
 ) -> Job:
     job = Job(
         owner_id=owner_id,
@@ -69,6 +70,7 @@ def enqueue(
         status="queued",
         voice_id=voice_id,
         narration_id=narration_id,
+        required_backend=required_backend or settings.default_job_backend,
         payload_json=json.dumps(payload),
         result_json="{}",
     )
@@ -78,11 +80,16 @@ def enqueue(
 
 
 # ---------- claim ----------
-def claim_next(db: Session) -> Job | None:
-    """Claim the oldest queued job. Safe for a single backend process."""
+def claim_next(db: Session, worker_backend: str) -> Job | None:
+    """Claim the oldest queued job the worker's backend capability can serve.
+
+    Only jobs tagged with the same ``required_backend`` as the requesting worker
+    are claimable, so a mock worker can never take a job that needs the real
+    qwen worker (and vice versa). Safe for a single backend process.
+    """
     job = db.execute(
         select(Job)
-        .where(Job.status == "queued")
+        .where(Job.status == "queued", Job.required_backend == worker_backend)
         .order_by(Job.created_at.asc())
         .limit(1)
     ).scalar_one_or_none()
@@ -135,7 +142,7 @@ def complete_job(
             voice.reference_audio_path = storage.voice_reference_rel(voice.id)
     elif job.type == "clone_prompt":
         voice = db.get(Voice, job.voice_id)
-        if voice is not None and voice.status == "preview_ready":
+        if voice is not None and voice.status == "approving":
             voice.status = "approved"
             voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
     elif job.type == "narration":
@@ -188,10 +195,14 @@ def _mark_failed_owner_object(db: Session, job: Job, error: str) -> None:
         if narration is not None:
             narration.status = "failed"
             narration.error = error[:4000]
-    elif job.type in ("design", "clone_prompt") and job.voice_id:
+    elif job.type == "design" and job.voice_id:
         voice = db.get(Voice, job.voice_id)
-        if voice is not None and voice.status in ("designing", "preview_ready"):
+        if voice is not None and voice.status == "designing":
             voice.status = "draft"
+    elif job.type == "clone_prompt" and job.voice_id:
+        voice = db.get(Voice, job.voice_id)
+        if voice is not None and voice.status == "approving":
+            voice.status = "preview_ready"
 
 
 # ---------- helpers ----------

@@ -39,13 +39,13 @@ export function VoiceLibraryPage() {
     void load()
   }, [])
 
-  // Poll while any voice is being designed.
-  const designing = voices.some((v) => v.status === 'designing')
+  // Poll while any voice is being designed or approved.
+  const busy = voices.some((v) => v.status === 'designing' || v.status === 'approving')
   useEffect(() => {
-    if (!designing) return
+    if (!busy) return
     const timer = setInterval(() => void load(), 2000)
     return () => clearInterval(timer)
-  }, [designing])
+  }, [busy])
 
   const approve = async (voice: Voice) => {
     setError('')
@@ -54,6 +54,7 @@ export function VoiceLibraryPage() {
       setVoices((prev) => prev.map((v) => (v.id === updated.id ? updated : v)))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Approval failed.')
+      void load()
     }
   }
 
@@ -197,6 +198,9 @@ function VoiceCard({
       {voice.status === 'designing' && (
         <p className="muted">The GPU worker is designing a preview voice…</p>
       )}
+      {voice.status === 'approving' && (
+        <p className="muted">The GPU worker is building the voice clone prompt…</p>
+      )}
       {downloadable && (
         <AudioPlayer src={referenceSrc} title={`${voice.name} reference`} />
       )}
@@ -204,6 +208,11 @@ function VoiceCard({
         {voice.status === 'draft' && (
           <button className="btn btn-primary" onClick={onDesign}>
             Design voice
+          </button>
+        )}
+        {voice.status === 'approving' && (
+          <button className="btn btn-primary" disabled title="Approval in progress">
+            Approving…
           </button>
         )}
         {voice.status === 'preview_ready' && (

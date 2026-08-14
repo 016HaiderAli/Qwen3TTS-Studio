@@ -2,6 +2,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -50,6 +51,10 @@ class Settings(BaseSettings):
     worker_token: str = ""
     worker_poll_timeout_seconds: int = 30
     max_job_attempts: int = 2
+    # Capability every web-tier job is tagged with at enqueue time. "qwen"
+    # (default) means only the real Qwen worker can claim it; set to "mock" to
+    # run the whole stack intentionally against the mock worker (dev/tests).
+    default_job_backend: str = "qwen"
 
     # --- Limits / validation ---
     max_script_chars: int = 100_000
@@ -88,6 +93,17 @@ class Settings(BaseSettings):
     @property
     def origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @model_validator(mode="after")
+    def _apply_dev_worker_token(self) -> "Settings":
+        """Dev-only default shared secret, matching start.sh's dev-worker-token.
+
+        Active only when the explicit test-only DEV_LOGIN flag is on; production
+        (DEV_LOGIN off) still requires a real WORKER_TOKEN and fails closed.
+        """
+        if not self.worker_token and self.dev_login:
+            self.worker_token = "dev-worker-token"
+        return self
 
 
 @lru_cache

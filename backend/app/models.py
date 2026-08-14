@@ -68,7 +68,7 @@ class Voice(Base):
     language: Mapped[str] = mapped_column(String(50), default="English")
     description: Mapped[str] = mapped_column(Text, default="")
     reference_text: Mapped[str] = mapped_column(Text, default="")
-    # draft | designing | preview_ready | approved
+    # draft | designing | preview_ready | approving | approved
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     reference_audio_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt_pt_path: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -127,6 +127,9 @@ class Job(Base):
     )
     # design | clone_prompt | narration
     type: Mapped[str] = mapped_column(String(30), index=True)
+    # worker capability required to claim this job: "qwen" | "mock".
+    # A mock worker can never claim a job tagged for the real qwen worker.
+    required_backend: Mapped[str] = mapped_column(String(30), default="qwen", index=True)
     # queued | running | succeeded | failed
     status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
     voice_id: Mapped[str | None] = mapped_column(

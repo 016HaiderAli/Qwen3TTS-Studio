@@ -8,7 +8,10 @@ import time
 
 from qwen_tts_worker.backends import MockBackend
 
-WORKER_AUTH = {"Authorization": "Bearer test-worker-token"}
+WORKER_AUTH = {
+    "Authorization": "Bearer test-worker-token",
+    "X-Worker-Backend": "mock",
+}
 
 
 def _run_worker(client, mock: MockBackend, max_jobs: int = 10) -> int:
@@ -201,3 +204,78 @@ def test_job_progress_during_narration(client):
     status = client.get(f"/api/jobs/{job_id}").json()
     assert status["job"]["status"] == "succeeded"
     assert status["job"]["progress"] == 100
+
+
+def test_approval_status_flow(client):
+    """approve returns 'approving'; a second approve is rejected; worker completion yields 'approved'."""
+    dev = client.get("/auth/dev-login?email=approve-flow@example.com")
+    assert dev.status_code == 200
+    voice = client.post(
+        "/api/voices", json={"name": "A", "language": "English"}
+    ).json()
+    client.post(
+        f"/api/voices/{voice['id']}/design",
+        json={"description": "d", "reference_text": "r", "language": "English"},
+    )
+    assert _run_worker(client, MockBackend()) == 1
+    voice = client.get(f"/api/voices/{voice['id']}").json()
+    assert voice["status"] == "preview_ready"
+
+    approv = client.post(f"/api/voices/{voice['id']}/approve")
+    assert approv.status_code == 200
+    assert approv.json()["status"] == "approving"
+
+    # A second approval while pending is rejected and enqueues no extra job.
+    again = client.post(f"/api/voices/{voice['id']}/approve")
+    assert again.status_code == 409
+    clone_jobs = [
+        j
+        for j in client.get("/api/jobs").json()
+        if j["type"] == "clone_prompt" and j["voice_id"] == voice["id"]
+    ]
+    assert len(clone_jobs) == 1
+
+    assert _run_worker(client, MockBackend()) == 1
+    voice = client.get(f"/api/voices/{voice['id']}").json()
+    assert voice["status"] == "approved"
+
+
+def test_approval_failure_returns_to_preview_ready(client):
+    """A permanently failed clone_prompt job returns the voice to preview_ready so approval can be retried."""
+    dev = client.get("/auth/dev-login?email=approve-fail@example.com")
+    assert dev.status_code == 200
+    voice = client.post(
+        "/api/voices", json={"name": "B", "language": "English"}
+    ).json()
+    client.post(
+        f"/api/voices/{voice['id']}/design",
+        json={"description": "d", "reference_text": "r", "language": "English"},
+    )
+    assert _run_worker(client, MockBackend()) == 1
+    assert client.post(f"/api/voices/{voice['id']}/approve").status_code == 200
+
+    claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    assert claim["type"] == "clone_prompt"
+    resp = client.post(
+        f"/internal/jobs/{claim['job_id']}/fail",
+        headers=WORKER_AUTH,
+        json={"error": "GPU exploded"},
+    )
+    assert resp.status_code == 200
+    claim2 = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    assert claim2 is not None
+    resp = client.post(
+        f"/internal/jobs/{claim2['job_id']}/fail",
+        headers=WORKER_AUTH,
+        json={"error": "still broken"},
+    )
+    assert resp.status_code == 200
+    assert client.post("/internal/jobs/poll", headers=WORKER_AUTH).status_code == 204
+
+    voice = client.get(f"/api/voices/{voice['id']}").json()
+    assert voice["status"] == "preview_ready"
+
+    # Approval can be retried without regenerating the preview.
+    approv = client.post(f"/api/voices/{voice['id']}/approve")
+    assert approv.status_code == 200
+    assert approv.json()["status"] == "approving"

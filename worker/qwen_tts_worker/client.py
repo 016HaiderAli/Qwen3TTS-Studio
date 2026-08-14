@@ -30,6 +30,9 @@ class WorkerAPIClient:
             headers={
                 "Authorization": f"Bearer {config.worker_token}",
                 "User-Agent": "voice-studio-gpu-worker/0.1",
+                # Capability gate: the backend only lets a worker claim/complete
+                # jobs tagged for the backend it declares here (qwen | mock).
+                "X-Worker-Backend": config.backend,
             },
             transport=transport,
         )

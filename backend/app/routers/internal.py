@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from .. import audio, jobs as job_service
 from ..config import get_settings
 from ..db import get_db
-from ..deps import require_worker
+from ..deps import require_worker_backend
 from ..models import Job
 from ..schemas import ArtifactUploadResponse, CompleteRequest, FailRequest, JobClaim
 
@@ -27,12 +27,21 @@ def _get_job(db: Session, job_id: str) -> Job:
     return job
 
 
+def _require_matching_backend(job: Job, backend: str) -> None:
+    """Only the backend a job was tagged for may touch it after it is claimed."""
+    if job.required_backend != backend:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Job requires the {job.required_backend} worker.",
+        )
+
+
 @router.post("/jobs/poll", response_model=JobClaim | None)
 def poll_job(
-    _: None = Depends(require_worker),
+    backend: str = Depends(require_worker_backend),
     db: Session = Depends(get_db),
 ):
-    job = job_service.claim_next(db)
+    job = job_service.claim_next(db, worker_backend=backend)
     if job is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     payload = json.loads(job.payload_json)
@@ -45,10 +54,11 @@ async def upload_artifact(
     job_id: str,
     field: str = Form(...),
     file: UploadFile = File(...),
-    _: None = Depends(require_worker),
+    backend: str = Depends(require_worker_backend),
     db: Session = Depends(get_db),
 ):
     job = _get_job(db, job_id)
+    _require_matching_backend(job, backend)
     if job.status != "running":
         raise HTTPException(status_code=409, detail="Job is not running.")
     data = await file.read(settings.max_upload_bytes + 1)
@@ -70,10 +80,11 @@ async def upload_artifact(
 def complete_job(
     job_id: str,
     body: CompleteRequest,
-    _: None = Depends(require_worker),
+    backend: str = Depends(require_worker_backend),
     db: Session = Depends(get_db),
 ):
     job = _get_job(db, job_id)
+    _require_matching_backend(job, backend)
     if job.status != "running":
         raise HTTPException(status_code=409, detail="Job is not running.")
     try:
@@ -88,10 +99,11 @@ def complete_job(
 def fail_job(
     job_id: str,
     body: FailRequest,
-    _: None = Depends(require_worker),
+    backend: str = Depends(require_worker_backend),
     db: Session = Depends(get_db),
 ):
     job = _get_job(db, job_id)
+    _require_matching_backend(job, backend)
     if job.status != "running":
         raise HTTPException(status_code=409, detail="Job is not running.")
     job_service.fail_job(db, job, body.error)

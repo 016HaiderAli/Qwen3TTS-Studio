@@ -18,10 +18,29 @@ def test_poll_returns_none_on_204():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/internal/jobs/poll"
         assert request.headers["authorization"] == "Bearer tok"
+        assert request.headers["x-worker-backend"] == "mock"
         return httpx.Response(204)
 
     with _client(handler) as client:
         assert client.poll() is None
+
+
+def test_declares_configured_backend_capability():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["backend"] = request.headers["x-worker-backend"]
+        return httpx.Response(204)
+
+    cfg = WorkerConfig(
+        backend_url="http://test",
+        worker_token="tok",
+        backend="qwen",
+        request_timeout_seconds=5,
+    )
+    with WorkerAPIClient(cfg, transport=httpx.MockTransport(handler)) as client:
+        client.poll()
+    assert captured["backend"] == "qwen"
 
 
 def test_poll_returns_claim():

@@ -4,7 +4,14 @@ from app import storage
 from app.db import SessionLocal
 from app.models import Narration, Voice
 
-WORKER_AUTH = {"Authorization": "Bearer test-worker-token"}
+WORKER_AUTH = {
+    "Authorization": "Bearer test-worker-token",
+    "X-Worker-Backend": "mock",
+}
+QWEN_AUTH = {
+    "Authorization": "Bearer test-worker-token",
+    "X-Worker-Backend": "qwen",
+}
 
 
 def _create_voice(client, name="V"):
@@ -32,6 +39,128 @@ def test_poll_requires_worker_token(client):
         headers={"Authorization": "Bearer wrong-token"},
     )
     assert resp.status_code == 401
+
+
+def test_internal_poll_reachable_with_worker_token(client, dev_login):
+    """POST /internal/jobs/poll is reachable (registered route + auth) and returns a claim."""
+    dev_login("alice@example.com")
+    voice = _create_voice(client)
+    _design(client, voice["id"])
+    resp = client.post("/internal/jobs/poll", headers=WORKER_AUTH)
+    assert resp.status_code == 200
+    claim = resp.json()
+    assert claim["job_id"]
+    assert claim["type"] == "design"
+
+
+def test_internal_poll_unconfigured_returns_503_not_404(client, monkeypatch):
+    """Without WORKER_TOKEN the route still exists but is disabled with 503, so
+    a request never looks like the route is missing (the misleading 404)."""
+    from app import deps
+
+    monkeypatch.setattr(deps.settings, "worker_token", "")
+    resp = client.post("/internal/jobs/poll")
+    assert resp.status_code == 503
+    assert "not configured" in resp.json()["detail"]
+
+
+def test_poll_requires_worker_backend_header(client, dev_login):
+    """A worker that does not declare a backend capability cannot claim jobs."""
+    dev_login("alice@example.com")
+    voice = _create_voice(client)
+    _design(client, voice["id"])
+    resp = client.post("/internal/jobs/poll", headers={"Authorization": "Bearer test-worker-token"})
+    assert resp.status_code == 403
+    # The job is still claimable by a worker that declares the matching backend.
+    claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    assert claim["type"] == "design"
+
+
+def test_mock_worker_cannot_claim_qwen_job(client, dev_login):
+    """A job tagged for the real qwen worker cannot be claimed by a mock worker."""
+    dev_login("alice@example.com")
+    voice = _create_voice(client)
+    with SessionLocal() as db:
+        from sqlalchemy import select
+
+        from app.models import User
+
+        user = db.execute(
+            select(User).where(User.email == "alice@example.com")
+        ).scalar_one()
+        job_service.enqueue(
+            db,
+            user.id,
+            "design",
+            {
+                "voice_id": voice["id"],
+                "language": "English",
+                "instruct": "Warm voice.",
+                "text": "Sample reference text.",
+            },
+            voice_id=voice["id"],
+            required_backend="qwen",
+        )
+        db.commit()
+
+    # mock worker finds nothing...
+    assert client.post("/internal/jobs/poll", headers=WORKER_AUTH).status_code == 204
+    # ...but the qwen worker claims it.
+    claim = client.post("/internal/jobs/poll", headers=QWEN_AUTH).json()
+    assert claim["type"] == "design"
+
+
+def test_mock_worker_cannot_complete_qwen_job(client, dev_login):
+    """Even if a mock worker learns a qwen job id, it cannot upload/complete it."""
+    dev_login("alice@example.com")
+    voice = _create_voice(client)
+    with SessionLocal() as db:
+        from sqlalchemy import select
+
+        from app.models import User
+
+        user = db.execute(
+            select(User).where(User.email == "alice@example.com")
+        ).scalar_one()
+        job = job_service.enqueue(
+            db,
+            user.id,
+            "design",
+            {"voice_id": voice["id"]},
+            voice_id=voice["id"],
+            required_backend="qwen",
+        )
+        db.commit()
+        job_id = job.id
+
+    # qwen worker claims it (moves to running)
+    claim = client.post("/internal/jobs/poll", headers=QWEN_AUTH).json()
+    assert claim["job_id"] == job_id
+
+    # a mock worker cannot upload or complete the qwen job
+    upload = client.post(
+        f"/internal/jobs/{job_id}/artifact",
+        headers=WORKER_AUTH,
+        data={"field": "reference_audio"},
+        files={"file": ("a.wav", b"x", "application/octet-stream")},
+    )
+    assert upload.status_code == 403
+    complete = client.post(
+        f"/internal/jobs/{job_id}/complete", headers=WORKER_AUTH, json={}
+    )
+    assert complete.status_code == 403
+
+
+def test_dev_worker_token_fallback_config():
+    """Dev-login mode defaults WORKER_TOKEN to the documented dev token; non-dev
+    mode still requires an explicit token (fails closed)."""
+    from app.config import Settings
+
+    dev = Settings(dev_login=True, worker_token="")
+    assert dev.worker_token == "dev-worker-token"
+
+    prod = Settings(dev_login=False, worker_token="")
+    assert prod.worker_token == ""
 
 
 def test_design_job_lifecycle(client, dev_login, make_wav_bytes):

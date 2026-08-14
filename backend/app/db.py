@@ -26,6 +26,30 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
+def _migrate_jobs_required_backend() -> None:
+    """Add the ``required_backend`` capability column to an existing jobs table.
+
+    ``create_all`` never alters existing tables; the live SQLite DB predates the
+    capability gate, so existing jobs are backfilled as ``qwen`` (they were all
+    web-tier jobs meant for the real worker).
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "jobs" not in insp.get_table_names():
+        return
+    columns = {c["name"] for c in insp.get_columns("jobs")}
+    if "required_backend" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE jobs ADD COLUMN required_backend VARCHAR(30) "
+                "NOT NULL DEFAULT 'qwen'"
+            )
+        )
+
+
 def init_db() -> None:
     """Create tables and the storage layout if missing."""
     from pathlib import Path
@@ -37,6 +61,7 @@ def init_db() -> None:
         db_path = settings.database_url.replace("sqlite:///", "", 1)
         Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    _migrate_jobs_required_backend()
     settings.storage_path.mkdir(parents=True, exist_ok=True)
     voices_dir = settings.storage_path / "voices"
     narrations_dir = settings.storage_path / "narrations"

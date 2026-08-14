@@ -46,7 +46,7 @@ export interface Voice {
   language: string
   description: string
   reference_text: string
-  status: 'draft' | 'designing' | 'preview_ready' | 'approved'
+  status: 'draft' | 'designing' | 'preview_ready' | 'approving' | 'approved'
   created_at: string
   updated_at: string
 }

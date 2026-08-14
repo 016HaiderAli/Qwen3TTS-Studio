@@ -1,6 +1,6 @@
 """Voice management and the voice-design workflow."""
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .. import jobs as job_service
@@ -108,6 +108,11 @@ def approve_voice(
     db: Session = Depends(get_db),
 ):
     voice = _get_owned_voice(db, voice_id, user)
+    if voice.status == "approving":
+        raise HTTPException(
+            status_code=409,
+            detail="Approval is already in progress.",
+        )
     if voice.status != "preview_ready":
         raise HTTPException(
             status_code=409,
@@ -115,6 +120,17 @@ def approve_voice(
         )
     if not voice.reference_audio_path:
         raise HTTPException(status_code=409, detail="No preview audio available.")
+    claimed = db.execute(
+        update(Voice)
+        .where(Voice.id == voice.id, Voice.status == "preview_ready")
+        .values(status="approving")
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Approval is already in progress.",
+        )
     payload = job_service.clone_prompt_payload(voice)
     job_service.enqueue(
         db,
