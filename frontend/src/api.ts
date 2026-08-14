@@ -96,8 +96,12 @@ export const api = {
   loginUrl: async (): Promise<{ url: string }> => request('/auth/login'),
 
   listVoices: () => request<Voice[]>('/api/voices'),
-  createVoice: (body: { name: string; language: string; description: string }) =>
-    request<Voice>('/api/voices', { method: 'POST', body: JSON.stringify(body) }),
+  createVoice: (body: {
+    name: string
+    language: string
+    description: string
+    reference_text: string
+  }) => request<Voice>('/api/voices', { method: 'POST', body: JSON.stringify(body) }),
   designVoice: (
     id: string,
     body: { description: string; reference_text: string; language: string },

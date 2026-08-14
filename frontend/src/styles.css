@@ -172,10 +172,6 @@ a {
   outline-offset: 0;
 }
 
-.input.grow {
-  flex: 1;
-}
-
 label {
   display: flex;
   flex-direction: column;
@@ -203,6 +199,72 @@ label {
   border-radius: var(--radius);
   padding: 2rem;
   text-align: center;
+}
+
+.empty-state .btn {
+  margin-top: 1rem;
+}
+
+/* ---------- create/design voice modal ---------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+}
+
+.field-title {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.char-count {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chip {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.chip:hover {
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+.chip-active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.voice-approval-hint {
+  font-size: 0.8rem;
 }
 
 .panel {
@@ -250,24 +312,6 @@ label {
 }
 
 /* ---------- voices ---------- */
-.create-voice {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  max-width: 720px;
-}
-
-.create-voice .input {
-  width: auto;
-  min-width: 160px;
-}
-
-.create-voice .grow {
-  flex: 1;
-  min-width: 220px;
-}
-
 .voice-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
