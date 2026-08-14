@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { ProgressBar } from '../components/ProgressBar'
+import { formatElapsed } from '../format'
 
 const LANGUAGES = [
   'Chinese',
@@ -32,6 +33,10 @@ export function NarrationStudioPage() {
   const [narration, setNarration] = useState<Narration | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [announcement, setAnnouncement] = useState('')
+  const statusRef = useRef<HTMLDivElement | null>(null)
+  const announcedRef = useRef<Set<string>>(new Set())
+  const scrolledRef = useRef<Set<string>>(new Set())
   const pollRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -48,26 +53,52 @@ export function NarrationStudioPage() {
     })()
   }, [preselect])
 
-  // Poll the narration until it reaches a terminal state.
+  const announceOnce = useCallback((id: string, status: string, message: string) => {
+    const key = `${id}:${status}`
+    if (announcedRef.current.has(key)) return
+    announcedRef.current.add(key)
+    setAnnouncement(message)
+  }, [])
+
+  const scrollOnce = useCallback((id: string) => {
+    const key = `scroll:${id}`
+    if (scrolledRef.current.has(key)) return
+    scrolledRef.current.add(key)
+    statusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [])
+
+  // Poll the narration until it reaches a terminal state, announcing and
+  // scrolling exactly once when it finishes.
   useEffect(() => {
-    if (!narration || (narration.status !== 'queued' && narration.status !== 'running')) {
+    const id = narration?.id
+    const status = narration?.status
+    if (id == null || status == null) return
+    if (status === 'ready') {
+      announceOnce(id, status, 'Narration ready.')
+      scrollOnce(id)
       return
     }
+    if (status === 'failed') {
+      announceOnce(id, status, 'Narration generation failed.')
+      scrollOnce(id)
+      return
+    }
+    if (status !== 'queued' && status !== 'running') return
     pollRef.current = window.setInterval(() => {
-      void api.getNarration(narration.id).then((n) => {
-        setNarration(n)
-        if (n.status === 'ready' || n.status === 'failed') {
-          if (pollRef.current) window.clearInterval(pollRef.current)
-        }
-      })
+      void api
+        .getNarration(id)
+        .then((n) => setNarration(n))
+        .catch(() => {
+          // Transient polling failure: keep the last known state and retry on
+          // the next tick.
+        })
     }, 2000)
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current)
     }
-  }, [narration])
+  }, [narration?.id, narration?.status, announceOnce, scrollOnce])
 
-  const generate = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const generate = async () => {
     if (!script.trim() || !voiceId) return
     setBusy(true)
     setError('')
@@ -80,6 +111,7 @@ export function NarrationStudioPage() {
         language,
       })
       setNarration(created)
+      setAnnouncement('Generation started.')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not start generation.')
     } finally {
@@ -88,27 +120,40 @@ export function NarrationStudioPage() {
   }
 
   const active = narration?.status === 'queued' || narration?.status === 'running'
+  const formDisabled = busy || active
   const progress =
     narration && narration.chunk_count > 0
       ? Math.round((narration.chunks_done / narration.chunk_count) * 100)
       : 0
+  const elapsed = narration
+    ? formatElapsed(Date.now() - new Date(narration.created_at).getTime())
+    : null
 
   return (
     <section>
       <div className="page-head">
         <h2>New narration</h2>
       </div>
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
       {error && <p className="error-banner">{error}</p>}
 
       <div className="studio-layout">
-        <form className="studio-form" onSubmit={generate}>
+        <form
+          className="studio-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void generate()
+          }}
+        >
           <label>
             Voice
             <select
               className="input"
               value={voiceId}
               onChange={(e) => setVoiceId(e.target.value)}
-              disabled={loadingVoices || busy}
+              disabled={loadingVoices || formDisabled}
               required
             >
               {!loadingVoices && voices.length === 0 && <option value="">No voices yet</option>}
@@ -128,6 +173,7 @@ export function NarrationStudioPage() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Untitled narration"
+              disabled={formDisabled}
             />
           </label>
           <label>
@@ -139,6 +185,7 @@ export function NarrationStudioPage() {
               onChange={(e) => setScript(e.target.value)}
               required
               placeholder="Paste the script to narrate. Separate paragraphs with a blank line — paragraph pauses are preserved."
+              disabled={formDisabled}
             />
           </label>
           <label>
@@ -149,6 +196,7 @@ export function NarrationStudioPage() {
               value={delivery}
               onChange={(e) => setDelivery(e.target.value)}
               placeholder="Optional: e.g. “Speak slowly and warmly, pause briefly after each sentence.”"
+              disabled={formDisabled}
             />
           </label>
           <label>
@@ -157,6 +205,7 @@ export function NarrationStudioPage() {
               className="input"
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
+              disabled={formDisabled}
             >
               {LANGUAGES.map((lang) => (
                 <option key={lang}>{lang}</option>
@@ -171,18 +220,19 @@ export function NarrationStudioPage() {
           </button>
         </form>
 
-        <aside className="studio-status">
+        <aside className="studio-status" ref={statusRef}>
           {active && narration && (
             <div className="panel">
               <h3>Generating</h3>
               <p className="muted">
                 Chunk {narration.chunks_done} of {narration.chunk_count}
+                {elapsed ? ` · ${elapsed} elapsed` : ''}
               </p>
               <ProgressBar value={progress} />
             </div>
           )}
           {narration?.status === 'ready' && (
-            <div className="panel success-panel">
+            <div className="panel success-panel success-highlight">
               <h3>Ready</h3>
               <p className="muted">
                 {narration.chunk_count} chunk{narration.chunk_count === 1 ? '' : 's'} ·{' '}
@@ -206,6 +256,13 @@ export function NarrationStudioPage() {
             <div className="panel error-panel">
               <h3>Generation failed</h3>
               <p className="muted">{narration.error ?? 'Unknown error.'}</p>
+              <button
+                className="btn btn-primary"
+                onClick={() => void generate()}
+                disabled={busy}
+              >
+                Retry
+              </button>
             </div>
           )}
           {!active && !narration && (

@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
+import { Spinner } from '../components/Spinner'
 import { StatusBadge } from '../components/StatusBadge'
+import { formatElapsed } from '../format'
 
 const LANGUAGES = [
   'Chinese',
@@ -38,18 +40,45 @@ const DESCRIPTION_HINT =
 const REFERENCE_HINT =
   'This exact sentence will be spoken by your new voice so you can judge it. Use 1–2 natural sentences that show off the voice.'
 
+function statusAnnouncement(voice: Voice, prev: string | undefined): string | null {
+  const { name, status } = voice
+  if (prev === 'designing' && status === 'draft') {
+    return `Design failed for ${name}.`
+  }
+  if (prev === 'approving' && status === 'preview_ready') {
+    return `Approval failed for ${name}. The preview is still available.`
+  }
+  switch (status) {
+    case 'designing':
+      return `Designing ${name}…`
+    case 'preview_ready':
+      return `${name} preview is ready.`
+    case 'approving':
+      return `Approving ${name}…`
+    case 'approved':
+      return `${name} is approved and ready for narration.`
+    default:
+      return null
+  }
+}
+
 export function VoiceLibraryPage() {
   const [voices, setVoices] = useState<Voice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [designTarget, setDesignTarget] = useState<Voice | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState('')
+  const [highlightId, setHighlightId] = useState<string | null>(null)
+  const announcedRef = useRef<Set<string>>(new Set())
+  const prevStatusRef = useRef<Record<string, string>>({})
+  const seededRef = useRef(false)
   const navigate = useNavigate()
 
   const load = async () => {
     try {
       setVoices(await api.listVoices())
-      setError('')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load voices.')
     } finally {
@@ -61,6 +90,31 @@ export function VoiceLibraryPage() {
     void load()
   }, [])
 
+  // Announce status transitions exactly once per voice+status.
+  useEffect(() => {
+    if (voices.length === 0) return
+    const next = { ...prevStatusRef.current }
+    const messages: string[] = []
+    for (const voice of voices) {
+      const prev = prevStatusRef.current[voice.id]
+      const status = voice.status
+      next[voice.id] = status
+      if (!seededRef.current || prev === status) continue
+      const key = `${voice.id}:${status}`
+      if (announcedRef.current.has(key)) continue
+      announcedRef.current.add(key)
+      const msg = statusAnnouncement(voice, prev)
+      if (msg) messages.push(msg)
+      if (status === 'preview_ready' || status === 'approved') setHighlightId(voice.id)
+    }
+    prevStatusRef.current = next
+    if (!seededRef.current) {
+      seededRef.current = true
+      return
+    }
+    if (messages.length > 0) setAnnouncement(messages.join(' '))
+  }, [voices])
+
   // Poll while any voice is being designed or approved.
   const busy = voices.some((v) => v.status === 'designing' || v.status === 'approving')
   useEffect(() => {
@@ -71,10 +125,13 @@ export function VoiceLibraryPage() {
 
   const approve = async (voice: Voice) => {
     setError('')
+    setApprovingId(voice.id)
     try {
       const updated = await api.approveVoice(voice.id)
+      setApprovingId(null)
       setVoices((prev) => prev.map((v) => (v.id === updated.id ? updated : v)))
     } catch (err) {
+      setApprovingId(null)
       setError(err instanceof ApiError ? err.message : 'Approval failed.')
       void load()
     }
@@ -99,6 +156,9 @@ export function VoiceLibraryPage() {
           New voice
         </button>
       </div>
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
       {error && <p className="error-banner">{error}</p>}
       {loading ? (
         <p className="muted">Loading…</p>
@@ -117,6 +177,8 @@ export function VoiceLibraryPage() {
             <VoiceCard
               key={voice.id}
               voice={voice}
+              highlighted={voice.id === highlightId}
+              approvePending={approvingId === voice.id}
               onDesign={() => setDesignTarget(voice)}
               onApprove={() => void approve(voice)}
               onDelete={() => void remove(voice)}
@@ -363,12 +425,16 @@ function CharCount({ value, max }: { value: string; max: number }) {
 
 function VoiceCard({
   voice,
+  highlighted,
+  approvePending,
   onDesign,
   onApprove,
   onDelete,
   onUse,
 }: {
   voice: Voice
+  highlighted: boolean
+  approvePending: boolean
   onDesign: () => void
   onApprove: () => void
   onDelete: () => void
@@ -376,8 +442,12 @@ function VoiceCard({
 }) {
   const referenceSrc = `/api/files/voices/${voice.id}/reference`
   const downloadable = voice.status === 'preview_ready' || voice.status === 'approved'
+  const busyStatus = voice.status === 'designing' || voice.status === 'approving'
+  const elapsed = busyStatus
+    ? formatElapsed(Date.now() - new Date(voice.updated_at).getTime())
+    : null
   return (
-    <article className="voice-card">
+    <article className={`voice-card${highlighted ? ' success-highlight' : ''}`}>
       <div className="voice-card-head">
         <h3>{voice.name}</h3>
         <StatusBadge status={voice.status} />
@@ -387,10 +457,18 @@ function VoiceCard({
         {voice.description ? ` — ${voice.description}` : ''}
       </p>
       {voice.status === 'designing' && (
-        <p className="muted">Creating your voice preview… (takes a minute on the GPU)</p>
+        <p className="muted voice-busy-line">
+          <Spinner label="Designing voice" />
+          <span>Creating your voice preview…</span>
+          {elapsed && <span className="elapsed"> · {elapsed} elapsed</span>}
+        </p>
       )}
       {voice.status === 'approving' && (
-        <p className="muted">Saving this voice for narrations… (takes a few moments on the GPU)</p>
+        <p className="muted voice-busy-line">
+          <Spinner label="Approving voice" />
+          <span>Saving this voice for narrations…</span>
+          {elapsed && <span className="elapsed"> · {elapsed} elapsed</span>}
+        </p>
       )}
       {voice.status === 'preview_ready' && (
         <p className="muted voice-approval-hint">
@@ -414,9 +492,15 @@ function VoiceCard({
         )}
         {voice.status === 'preview_ready' && (
           <>
-            <button className="btn btn-primary" onClick={onApprove}>
-              Approve
-            </button>
+            {approvePending ? (
+              <button className="btn btn-primary" disabled title="Approval in progress">
+                Approving…
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={onApprove}>
+                Approve
+              </button>
+            )}
             <button className="btn" onClick={onDesign}>
               Redesign
             </button>

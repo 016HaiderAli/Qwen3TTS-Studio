@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { VoiceLibraryPage } from './VoiceLibraryPage'
@@ -11,7 +11,7 @@ function jsonResponse(status: number, body?: unknown) {
   })
 }
 
-type RouteHandler = (url: string, init?: RequestInit) => Response
+type RouteHandler = (url: string, init?: RequestInit) => Response | Promise<Response>
 
 function mockApi(handler: RouteHandler) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) =>
@@ -51,7 +51,29 @@ async function fillCreateForm() {
   return user
 }
 
+async function fillDesignForm() {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'Design voice' }))
+  await user.type(screen.getByLabelText(/^voice description$/i), 'A calm voice')
+  await user.type(screen.getByLabelText(/^reference text$/i), 'Hello world')
+  return user
+}
+
+const flushPromises = async () => {
+  await act(async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+  })
+}
+
+const advance = async (ms: number) => {
+  await act(async () => {
+    vi.advanceTimersByTime(ms)
+  })
+  await flushPromises()
+}
+
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -195,6 +217,185 @@ describe('VoiceLibraryPage — create & design', () => {
     renderPage()
     await waitFor(() =>
       expect(screen.getByText(/Happy with this preview\?/)).toBeInTheDocument(),
+    )
+  })
+})
+
+describe('VoiceLibraryPage — progress & completion feedback', () => {
+  const designingVoice = {
+    ...draftVoice,
+    status: 'designing',
+    updated_at: new Date(Date.now() - 90000).toISOString(),
+  }
+
+  const designingA = { ...draftVoice, id: 'a1', name: 'Voice A', status: 'designing' }
+  const designingB = { ...draftVoice, id: 'b1', name: 'Voice B', status: 'designing' }
+  const draftB = { ...draftVoice, id: 'b1', name: 'Voice B', status: 'draft' }
+
+  const liveRegion = () => {
+    const node = document.querySelector('[aria-live="polite"]')
+    expect(node).not.toBeNull()
+    return node as HTMLElement
+  }
+
+  it('shows an indeterminate spinner and elapsed time for a designing voice', async () => {
+    mockApi((url) =>
+      url.endsWith('/api/voices')
+        ? jsonResponse(200, [designingVoice])
+        : jsonResponse(404, {}),
+    )
+    renderPage()
+    expect(await screen.findByRole('status', { name: 'Designing voice' })).toBeInTheDocument()
+    expect(screen.getByText(/elapsed/)).toBeInTheDocument()
+  })
+
+  it('announces when a voice starts designing', async () => {
+    const designing = { ...draftVoice, status: 'designing' }
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/voices') && method === 'GET') return jsonResponse(200, [draftVoice])
+      if (url.endsWith('/api/voices/v1/design') && method === 'POST') {
+        return jsonResponse(200, designing)
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Design voice' })).toBeInTheDocument(),
+    )
+    await fillDesignForm()
+    await userEvent.click(screen.getByRole('button', { name: 'Generate preview' }))
+    await waitFor(() => expect(liveRegion()).toHaveTextContent('Designing Narrator…'))
+  })
+
+  it('announces designing to preview-ready exactly once', async () => {
+    vi.useFakeTimers()
+    const previewReady = { ...draftVoice, status: 'preview_ready' }
+    let getCalls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        getCalls++
+        return jsonResponse(200, getCalls === 1 ? [designingVoice] : [previewReady])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    expect(liveRegion()).toHaveTextContent('')
+    await advance(2000)
+    expect(liveRegion()).toHaveTextContent('Narrator preview is ready.')
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+  })
+
+  it('announces approving to approved', async () => {
+    vi.useFakeTimers()
+    const approving = { ...draftVoice, status: 'approving' }
+    const approved = { ...draftVoice, status: 'approved' }
+    let getCalls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        getCalls++
+        if (getCalls === 1) return jsonResponse(200, [approving])
+        return jsonResponse(200, [approved])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    await advance(2000)
+    expect(liveRegion()).toHaveTextContent('Narrator is approved and ready for narration.')
+    expect(screen.getByRole('button', { name: 'Use for narration' })).toBeInTheDocument()
+  })
+
+  it('detects design failure and keeps the retry action available', async () => {
+    vi.useFakeTimers()
+    let getCalls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        getCalls++
+        return jsonResponse(200, getCalls === 1 ? [designingVoice] : [draftVoice])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    await advance(2000)
+    expect(liveRegion()).toHaveTextContent('Design failed for Narrator.')
+    expect(screen.getByRole('button', { name: 'Design voice' })).toBeInTheDocument()
+  })
+
+  it('detects approval failure and keeps the preview retry available', async () => {
+    vi.useFakeTimers()
+    const approving = { ...draftVoice, status: 'approving' }
+    const previewReady = { ...draftVoice, status: 'preview_ready' }
+    let getCalls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        getCalls++
+        return jsonResponse(200, getCalls === 1 ? [approving] : [previewReady])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    await advance(2000)
+    expect(liveRegion()).toHaveTextContent(
+      'Approval failed for Narrator. The preview is still available.',
+    )
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+  })
+
+  it('does not re-announce a status that already transitioned', async () => {
+    vi.useFakeTimers()
+    let getCalls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        getCalls++
+        let b = designingB
+        if (getCalls === 2 || getCalls === 4) b = draftB
+        return jsonResponse(200, [designingA, b])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    await advance(2000)
+    expect(liveRegion()).toHaveTextContent('Design failed for Voice B.')
+    await advance(2000)
+    expect(liveRegion()).toHaveTextContent('Designing Voice B…')
+    await advance(2000)
+    expect(liveRegion()).toHaveTextContent('Designing Voice B…')
+  })
+
+  it('disables Approve immediately while approval is pending', async () => {
+    const previewReady = { ...draftVoice, status: 'preview_ready' }
+    let resolveApprove!: (resp: Response) => void
+    const approvePromise = new Promise<Response>((res) => {
+      resolveApprove = res
+    })
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/voices') && method === 'GET') {
+        return jsonResponse(200, [previewReady])
+      }
+      if (url.endsWith('/api/voices/v1/approve') && method === 'POST') {
+        return approvePromise
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument(),
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Approve' }))
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approving…' })).toBeDisabled()
+    await act(async () => {
+      resolveApprove(jsonResponse(200, { ...previewReady, status: 'approving' }))
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Approving…' })).toBeDisabled(),
     )
   })
 })
