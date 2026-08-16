@@ -41,16 +41,26 @@ const REFERENCE_HINT =
   'This exact sentence will be spoken by your new voice so you can judge it. Use 1–2 natural sentences that show off the voice.'
 
 function statusAnnouncement(voice: Voice, prev: string | undefined): string | null {
-  const { name, status } = voice
+  const { name, status, has_approved_prompt } = voice
   if (prev === 'designing' && status === 'draft') {
     return `Design failed for ${name}.`
   }
+  if (prev === 'designing' && status === 'approved') {
+    return `Redesign failed for ${name}. Your approved voice is still available.`
+  }
   if (prev === 'approving' && status === 'preview_ready') {
-    return `Approval failed for ${name}. The preview is still available.`
+    return has_approved_prompt
+      ? `Approval failed for ${name}. Your approved voice is still available.`
+      : `Approval failed for ${name}. The preview is still available.`
+  }
+  if (prev === 'designing' && status === 'preview_ready' && has_approved_prompt) {
+    return `A new preview for ${name} is ready. Approve it to replace your current approved version.`
   }
   switch (status) {
     case 'designing':
-      return `Designing ${name}…`
+      return has_approved_prompt
+        ? `Generating a new version of ${name}…`
+        : `Designing ${name}…`
     case 'preview_ready':
       return `${name} preview is ready.`
     case 'approving':
@@ -90,7 +100,7 @@ export function VoiceLibraryPage() {
     void load()
   }, [])
 
-  // Announce status transitions exactly once per voice+status.
+  // Announce status transitions exactly once per voice+transition.
   useEffect(() => {
     if (voices.length === 0) return
     const next = { ...prevStatusRef.current }
@@ -100,12 +110,18 @@ export function VoiceLibraryPage() {
       const status = voice.status
       next[voice.id] = status
       if (!seededRef.current || prev === status) continue
-      const key = `${voice.id}:${status}`
+      // Key on the transition so a redesign cycle (approved -> designing ->
+      // approved) can announce again instead of being suppressed by the
+      // earlier 'approved' announcement.
+      const key = `${voice.id}:${prev}->${status}`
       if (announcedRef.current.has(key)) continue
       announcedRef.current.add(key)
       const msg = statusAnnouncement(voice, prev)
       if (msg) messages.push(msg)
-      if (status === 'preview_ready' || status === 'approved') setHighlightId(voice.id)
+      const failedRedesign = prev === 'designing' && status === 'approved'
+      if ((status === 'preview_ready' || status === 'approved') && !failedRedesign) {
+        setHighlightId(voice.id)
+      }
     }
     prevStatusRef.current = next
     if (!seededRef.current) {
@@ -440,9 +456,14 @@ function VoiceCard({
   onDelete: () => void
   onUse: () => void
 }) {
+  const hasApprovedPrompt = voice.has_approved_prompt
+  const isRedesign = hasApprovedPrompt && voice.status !== 'approved'
   const referenceSrc = `/api/files/voices/${voice.id}/reference`
-  const downloadable = voice.status === 'preview_ready' || voice.status === 'approved'
   const busyStatus = voice.status === 'designing' || voice.status === 'approving'
+  const downloadable =
+    voice.status === 'preview_ready' ||
+    voice.status === 'approved' ||
+    (hasApprovedPrompt && busyStatus)
   const elapsed = busyStatus
     ? formatElapsed(Date.now() - new Date(voice.updated_at).getTime())
     : null
@@ -459,25 +480,52 @@ function VoiceCard({
       {voice.status === 'designing' && (
         <p className="muted voice-busy-line">
           <Spinner label="Designing voice" />
-          <span>Creating your voice preview…</span>
+          <span>
+            {hasApprovedPrompt
+              ? 'Creating a new version of your approved voice…'
+              : 'Creating your voice preview…'}
+          </span>
           {elapsed && <span className="elapsed"> · {elapsed} elapsed</span>}
         </p>
       )}
       {voice.status === 'approving' && (
         <p className="muted voice-busy-line">
           <Spinner label="Approving voice" />
-          <span>Saving this voice for narrations…</span>
+          <span>
+            {hasApprovedPrompt
+              ? 'Saving this new version to replace your approved voice…'
+              : 'Saving this voice for narrations…'}
+          </span>
           {elapsed && <span className="elapsed"> · {elapsed} elapsed</span>}
+        </p>
+      )}
+      {hasApprovedPrompt && voice.status === 'approved' && (
+        <p className="muted voice-current-callout">This is your current approved version.</p>
+      )}
+      {isRedesign && (
+        <p className="muted voice-current-callout">
+          Your current approved version stays available for narration until you approve the new
+          one.
         </p>
       )}
       {voice.status === 'preview_ready' && (
         <p className="muted voice-approval-hint">
-          Happy with this preview? Approve it to save this voice for narration. This builds a
-          reusable voice signature from the clip — it takes a few moments on the GPU.
+          {hasApprovedPrompt
+            ? 'Happy with this new version? Approving it replaces your current approved voice for narration.'
+            : 'Happy with this preview? Approve it to save this voice for narration. This builds a reusable voice signature from the clip — it takes a few moments on the GPU.'}
         </p>
       )}
       {downloadable && (
-        <AudioPlayer src={referenceSrc} title={`${voice.name} reference`} />
+        <AudioPlayer
+          src={referenceSrc}
+          title={
+            hasApprovedPrompt && voice.status === 'preview_ready'
+              ? `${voice.name} new version preview`
+              : hasApprovedPrompt && busyStatus
+                ? `${voice.name} current approved version`
+                : `${voice.name} reference`
+          }
+        />
       )}
       <div className="voice-actions">
         {voice.status === 'draft' && (
@@ -515,6 +563,11 @@ function VoiceCard({
               Redesign
             </button>
           </>
+        )}
+        {hasApprovedPrompt && voice.status !== 'approved' && (
+          <button className="btn" onClick={onUse} title="Uses your current approved version">
+            Use for narration
+          </button>
         )}
         <button className="btn btn-ghost" onClick={onDelete}>
           Delete
@@ -567,7 +620,15 @@ function DesignVoiceModal({
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
       <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h3>Design voice — {voice.name}</h3>
+        <h3>
+          {voice.has_approved_prompt ? 'Redesign voice' : 'Design voice'} — {voice.name}
+        </h3>
+        {voice.has_approved_prompt && (
+          <p className="muted voice-current-callout">
+            Your current approved version stays available for narration until you approve the new
+            one.
+          </p>
+        )}
         <form onSubmit={submit}>
           <VoiceSpecFields
             prefix="redesign"

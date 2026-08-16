@@ -47,6 +47,7 @@ export interface Voice {
   description: string
   reference_text: string
   status: 'draft' | 'designing' | 'preview_ready' | 'approving' | 'approved'
+  has_approved_prompt: boolean
   created_at: string
   updated_at: string
 }

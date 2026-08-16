@@ -26,6 +26,7 @@ const draftVoice = {
   description: 'A calm voice',
   reference_text: 'Hello world',
   status: 'draft',
+  has_approved_prompt: false,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }
@@ -397,5 +398,160 @@ describe('VoiceLibraryPage — progress & completion feedback', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Approving…' })).toBeDisabled(),
     )
+  })
+})
+
+describe('VoiceLibraryPage — non-destructive redesign', () => {
+  const approvedVoice = {
+    ...draftVoice,
+    status: 'approved',
+    has_approved_prompt: true,
+  }
+
+  const liveRegion = () => {
+    const node = document.querySelector('[aria-live="polite"]')
+    expect(node).not.toBeNull()
+    return node as HTMLElement
+  }
+
+  it('keeps the approved voice usable for narration while a redesign is in progress', async () => {
+    const designing = { ...approvedVoice, status: 'designing' }
+    mockApi((url) =>
+      url.endsWith('/api/voices')
+        ? jsonResponse(200, [designing])
+        : jsonResponse(404, {}),
+    )
+    renderPage()
+
+    expect(
+      await screen.findByRole('button', { name: 'Use for narration' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/current approved version stays available for narration/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Creating a new version of your approved voice/)).toBeInTheDocument()
+  })
+
+  it('marks the approved card as the current approved version', async () => {
+    mockApi((url) =>
+      url.endsWith('/api/voices')
+        ? jsonResponse(200, [approvedVoice])
+        : jsonResponse(404, {}),
+    )
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByText(/This is your current approved version/)).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Use for narration' })).toBeInTheDocument()
+  })
+
+  it('announces that a redesign is generating a new version', async () => {
+    const designing = { ...approvedVoice, status: 'designing' }
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/voices') && method === 'GET') {
+        return jsonResponse(200, [approvedVoice])
+      }
+      if (url.endsWith('/api/voices/v1/design') && method === 'POST') {
+        return jsonResponse(200, designing)
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Redesign' })).toBeInTheDocument(),
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Redesign' }))
+    expect(screen.getByRole('heading', { name: 'Redesign voice — Narrator' })).toBeInTheDocument()
+    expect(
+      screen.getByText(/current approved version stays available for narration/),
+    ).toBeInTheDocument()
+    await user.type(screen.getByLabelText(/^reference text$/i), 'New script line')
+    await user.click(screen.getByRole('button', { name: 'Generate preview' }))
+    await waitFor(() => expect(liveRegion()).toHaveTextContent('Generating a new version of Narrator…'))
+    expect(
+      screen.getByText(/Creating a new version of your approved voice/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Use for narration' })).toBeInTheDocument()
+  })
+
+  it('explains that approving a redesigned preview replaces the current version', async () => {
+    const previewReady = { ...approvedVoice, status: 'preview_ready' }
+    mockApi((url) =>
+      url.endsWith('/api/voices')
+        ? jsonResponse(200, [previewReady])
+        : jsonResponse(404, {}),
+    )
+    renderPage()
+    await waitFor(() =>
+      expect(
+        screen.getByText(/replaces your current approved voice for narration/),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+  })
+
+  it('keeps the narration action available while a redesigned preview awaits approval', async () => {
+    const previewReady = { ...approvedVoice, status: 'preview_ready' }
+    mockApi((url) =>
+      url.endsWith('/api/voices')
+        ? jsonResponse(200, [previewReady])
+        : jsonResponse(404, {}),
+    )
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Use for narration' })).toBeInTheDocument(),
+    )
+  })
+
+  it('restores the approved state after a failed redesign', async () => {
+    vi.useFakeTimers()
+    const designing = { ...approvedVoice, status: 'designing' }
+    let getCalls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        getCalls++
+        return jsonResponse(200, getCalls === 1 ? [designing] : [approvedVoice])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    await advance(2000)
+
+    expect(
+      screen.getByText(/Redesign failed for Narrator\. Your approved voice is still available\./),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Use for narration' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Redesign' })).toBeInTheDocument()
+    expect(liveRegion()).toHaveTextContent(
+      'Redesign failed for Narrator. Your approved voice is still available.',
+    )
+  })
+
+  it('announces approval failure of a redesign keeping the approved version usable', async () => {
+    vi.useFakeTimers()
+    const approving = { ...approvedVoice, status: 'approving' }
+    const previewReady = { ...approvedVoice, status: 'preview_ready' }
+    let getCalls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        getCalls++
+        return jsonResponse(200, getCalls === 1 ? [approving] : [previewReady])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    await advance(2000)
+
+    expect(liveRegion()).toHaveTextContent(
+      'Approval failed for Narrator. Your approved voice is still available.',
+    )
+    expect(screen.getByRole('button', { name: 'Use for narration' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
   })
 })

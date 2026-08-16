@@ -25,6 +25,7 @@ const approvedVoice = {
   description: 'A calm voice',
   reference_text: 'Hello world',
   status: 'approved',
+  has_approved_prompt: true,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }
@@ -274,5 +275,41 @@ describe('NarrationStudioPage — progress & completion feedback', () => {
     await advance(2000)
     await advance(2000)
     expect(screen.getByText(/Chunk 2 of 3/)).toBeInTheDocument()
+  })
+})
+
+describe('NarrationStudioPage — voice selection', () => {
+  it('includes a voice that has an approved version even while it is being redesigned', async () => {
+    const redesigning = {
+      ...approvedVoice,
+      status: 'designing',
+    }
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) return jsonResponse(200, [redesigning])
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    const select = screen.getByLabelText(/^Voice$/) as HTMLSelectElement
+    expect(select).toBeInTheDocument()
+    expect([...select.options].map((o) => o.value)).toEqual(['v1'])
+    expect(screen.getByText('Narrator (English)')).toBeInTheDocument()
+  })
+
+  it('does not offer a draft voice without an approved version', async () => {
+    const draft = {
+      ...approvedVoice,
+      status: 'draft',
+      has_approved_prompt: false,
+    }
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) return jsonResponse(200, [draft])
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    const select = screen.getByLabelText(/^Voice$/) as HTMLSelectElement
+    expect(select).toBeInTheDocument()
+    expect([...select.options].map((o) => o.value)).toEqual([])
   })
 })

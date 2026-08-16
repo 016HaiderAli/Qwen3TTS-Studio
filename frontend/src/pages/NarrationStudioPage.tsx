@@ -158,7 +158,7 @@ export function NarrationStudioPage() {
             >
               {!loadingVoices && voices.length === 0 && <option value="">No voices yet</option>}
               {voices
-                .filter((v) => v.status === 'approved')
+                .filter((v) => v.has_approved_prompt)
                 .map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name} ({v.language})
@@ -269,7 +269,7 @@ export function NarrationStudioPage() {
             <div className="panel">
               <h3>How it works</h3>
               <ol className="muted">
-                <li>Pick an approved voice.</li>
+                <li>Pick a voice that has an approved version.</li>
                 <li>Paste your script.</li>
                 <li>Optionally add delivery direction.</li>
                 <li>Generate and listen.</li>
