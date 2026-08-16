@@ -286,6 +286,22 @@ label {
   padding-left: 0.5rem;
 }
 
+.script-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.char-limit-warn {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.duration-estimate {
+  font-style: italic;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);

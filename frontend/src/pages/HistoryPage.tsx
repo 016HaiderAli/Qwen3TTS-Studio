@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, ApiError, type NarrationListItem } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { StatusBadge } from '../components/StatusBadge'
@@ -114,6 +115,14 @@ export function HistoryPage() {
                       Download
                     </a>
                   </div>
+                )}
+                {(item.status === 'ready' || item.status === 'failed') && (
+                  <Link
+                    className="btn"
+                    to={`/narration?reuse=${item.id}&voice=${item.voice_id}`}
+                  >
+                    Reuse in studio
+                  </Link>
                 )}
                 <button
                   className="btn btn-ghost"

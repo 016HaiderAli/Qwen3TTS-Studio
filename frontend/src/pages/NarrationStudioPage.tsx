@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { ProgressBar } from '../components/ProgressBar'
+import { StatusBadge } from '../components/StatusBadge'
 import { formatElapsed } from '../format'
 
 const LANGUAGES = [
@@ -18,17 +19,22 @@ const LANGUAGES = [
   'Italian',
 ]
 
+const MAX_SCRIPT_CHARS = 100_000
+const ESTIMATED_WORDS_PER_MINUTE = 150
+
 export function NarrationStudioPage() {
   const [params] = useSearchParams()
   const preselect = params.get('voice')
+  const reuseId = params.get('reuse')
 
   const [voices, setVoices] = useState<Voice[]>([])
-  const [voiceId, setVoiceId] = useState(preselect ?? '')
+  const [voiceId, setVoiceId] = useState('')
   const [title, setTitle] = useState('')
   const [script, setScript] = useState('')
   const [delivery, setDelivery] = useState('')
   const [language, setLanguage] = useState('English')
   const [loadingVoices, setLoadingVoices] = useState(true)
+  const languageTouchedRef = useRef(false)
 
   const [narration, setNarration] = useState<Narration | null>(null)
   const [busy, setBusy] = useState(false)
@@ -40,18 +46,59 @@ export function NarrationStudioPage() {
   const pollRef = useRef<number | null>(null)
 
   useEffect(() => {
+    const selectVoice = (rows: Voice[], preferred?: string | null) => {
+      const approved = rows.filter((v) => v.has_approved_prompt)
+      if (preferred) {
+        const match = approved.find((v) => v.id === preferred)
+        if (match) return match
+      }
+      return approved[0] ?? null
+    }
     void (async () => {
       try {
         const rows = await api.listVoices()
         setVoices(rows)
-        if (!preselect && rows.length > 0) setVoiceId(rows[0].id)
+        const syncLanguage = (voice: Voice) => {
+          if (!languageTouchedRef.current) setLanguage(voice.language)
+        }
+        if (reuseId) {
+          try {
+            const reuse = await api.getNarration(reuseId)
+            setTitle(reuse.title)
+            setScript(reuse.script)
+            setDelivery(reuse.delivery_direction)
+            setLanguage(reuse.language)
+            languageTouchedRef.current = true
+            const voice = selectVoice(rows, preselect ?? reuse.voice_id)
+            if (voice) setVoiceId(voice.id)
+          } catch (err) {
+            setError(
+              err instanceof ApiError && err.status === 404
+                ? 'Narration not found.'
+                : err instanceof ApiError
+                  ? err.message
+                  : 'Could not load the narration to reuse.',
+            )
+            const voice = selectVoice(rows, preselect)
+            if (voice) {
+              setVoiceId(voice.id)
+              syncLanguage(voice)
+            }
+          }
+        } else {
+          const voice = selectVoice(rows, preselect)
+          if (voice) {
+            setVoiceId(voice.id)
+            syncLanguage(voice)
+          }
+        }
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Failed to load voices.')
       } finally {
         setLoadingVoices(false)
       }
     })()
-  }, [preselect])
+  }, [preselect, reuseId])
 
   const announceOnce = useCallback((id: string, status: string, message: string) => {
     const key = `${id}:${status}`
@@ -129,6 +176,16 @@ export function NarrationStudioPage() {
     ? formatElapsed(Date.now() - new Date(narration.created_at).getTime())
     : null
 
+  const selectedVoice = voices.find((v) => v.id === voiceId && v.has_approved_prompt) ?? null
+  const approvedCount = voices.filter((v) => v.has_approved_prompt).length
+  const words = script.trim() ? script.trim().split(/\s+/).length : 0
+  const charCount = script.length
+  const overCharLimit = charCount > MAX_SCRIPT_CHARS
+  // Rough heuristic (~150 wpm). Clearly labeled as an estimate in the UI and
+  // replaced by the measured duration once generation completes.
+  const estimateSec = words > 0 ? Math.round((words / ESTIMATED_WORDS_PER_MINUTE) * 60) : 0
+  const showEstimate = !narration && !active && words > 0
+
   return (
     <section>
       <div className="page-head">
@@ -152,11 +209,18 @@ export function NarrationStudioPage() {
             <select
               className="input"
               value={voiceId}
-              onChange={(e) => setVoiceId(e.target.value)}
+              onChange={(e) => {
+                const id = e.target.value
+                setVoiceId(id)
+                const picked = voices.find((v) => v.id === id && v.has_approved_prompt)
+                if (picked && !languageTouchedRef.current) setLanguage(picked.language)
+              }}
               disabled={loadingVoices || formDisabled}
               required
             >
-              {!loadingVoices && voices.length === 0 && <option value="">No voices yet</option>}
+              {!loadingVoices && approvedCount === 0 && (
+                <option value="">No approved voices yet</option>
+              )}
               {voices
                 .filter((v) => v.has_approved_prompt)
                 .map((v) => (
@@ -188,6 +252,17 @@ export function NarrationStudioPage() {
               disabled={formDisabled}
             />
           </label>
+          <span className="muted script-meta">
+            <span className={overCharLimit ? 'char-limit-warn' : undefined}>
+              {charCount.toLocaleString()} / {MAX_SCRIPT_CHARS.toLocaleString()} characters
+            </span>
+            <span>· {words} words</span>
+            {showEstimate && (
+              <span className="duration-estimate">
+                · ~{formatElapsed(estimateSec * 1000)} estimated at ~150 words/min
+              </span>
+            )}
+          </span>
           <label>
             Delivery / voice direction
             <textarea
@@ -204,7 +279,10 @@ export function NarrationStudioPage() {
             <select
               className="input"
               value={language}
-              onChange={(e) => setLanguage(e.target.value)}
+              onChange={(e) => {
+                setLanguage(e.target.value)
+                languageTouchedRef.current = true
+              }}
               disabled={formDisabled}
             >
               {LANGUAGES.map((lang) => (
@@ -221,14 +299,61 @@ export function NarrationStudioPage() {
         </form>
 
         <aside className="studio-status" ref={statusRef}>
+          {selectedVoice && (
+            <div className="panel">
+              <h3>Selected voice</h3>
+              {selectedVoice.status === 'approved' ? (
+                <>
+                  <p className="muted">
+                    {selectedVoice.name} · {selectedVoice.language}
+                    {selectedVoice.description ? ` — ${selectedVoice.description}` : ''}
+                  </p>
+                  <StatusBadge status={selectedVoice.status} />
+                </>
+              ) : (
+                <>
+                  <p className="muted voice-current-callout">
+                    This is your current approved voice. It stays usable for narration while a new
+                    version is being designed; the redesign is a replacement candidate.
+                  </p>
+                  <StatusBadge status={selectedVoice.status} />
+                </>
+              )}
+              <AudioPlayer
+                src={`/api/files/voices/${selectedVoice.id}/reference`}
+                title={`${selectedVoice.name} current approved voice`}
+              />
+            </div>
+          )}
+          {!loadingVoices && approvedCount === 0 && (
+            <div className="panel">
+              <h3>No approved voices yet</h3>
+              <p className="muted">
+                You need at least one approved voice before you can narrate. Design and approve a
+                voice first.
+              </p>
+              <Link to="/voices" className="btn btn-primary">
+                Go to voice library
+              </Link>
+            </div>
+          )}
           {active && narration && (
             <div className="panel">
               <h3>Generating</h3>
-              <p className="muted">
-                Chunk {narration.chunks_done} of {narration.chunk_count}
-                {elapsed ? ` · ${elapsed} elapsed` : ''}
-              </p>
-              <ProgressBar value={progress} />
+              {narration.status === 'queued' ? (
+                <p className="muted">
+                  Waiting for the GPU worker to pick up your narration…
+                  {elapsed ? ` ${elapsed} elapsed` : ''}
+                </p>
+              ) : (
+                <>
+                  <p className="muted">
+                    Chunk {narration.chunks_done} of {narration.chunk_count}
+                    {elapsed ? ` · ${elapsed} elapsed` : ''}
+                  </p>
+                  <ProgressBar value={progress} />
+                </>
+              )}
             </div>
           )}
           {narration?.status === 'ready' && (
@@ -265,7 +390,7 @@ export function NarrationStudioPage() {
               </button>
             </div>
           )}
-          {!active && !narration && (
+          {!active && !narration && approvedCount > 0 && (
             <div className="panel">
               <h3>How it works</h3>
               <ol className="muted">

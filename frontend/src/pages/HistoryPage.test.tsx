@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { HistoryPage } from './HistoryPage'
 
 function jsonResponse(status: number, body?: unknown) {
@@ -35,7 +36,11 @@ const readyItem = {
 }
 
 function renderPage() {
-  return render(<HistoryPage />)
+  return render(
+    <MemoryRouter>
+      <HistoryPage />
+    </MemoryRouter>,
+  )
 }
 
 const flushPromises = async () => {
@@ -134,5 +139,32 @@ describe('HistoryPage — progress & completion feedback', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }))
     expect(deleted).toBe(true)
     await waitFor(() => expect(screen.queryByText('My narration')).not.toBeInTheDocument())
+  })
+})
+
+describe('HistoryPage — reuse in studio', () => {
+  it('links ready narrations to the studio with reuse and voice params', async () => {
+    mockApi((url) =>
+      url.endsWith('/api/narrations') ? jsonResponse(200, [readyItem]) : jsonResponse(404, {}),
+    )
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Reuse in studio' })).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: 'Reuse in studio' })).toHaveAttribute(
+      'href',
+      '/narration?reuse=n1&voice=v1',
+    )
+  })
+
+  it('also offers reuse for failed narrations', async () => {
+    const failedItem = { ...queuedItem, status: 'failed' }
+    mockApi((url) =>
+      url.endsWith('/api/narrations') ? jsonResponse(200, [failedItem]) : jsonResponse(404, {}),
+    )
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Reuse in studio' })).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: 'Reuse in studio' })).toHaveAttribute(
+      'href',
+      '/narration?reuse=n1&voice=v1',
+    )
   })
 })
