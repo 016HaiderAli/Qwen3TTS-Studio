@@ -105,7 +105,7 @@ def claim_next(db: Session, worker_backend: str) -> Job | None:
 def store_artifact(db: Session, job: Job, field: str, data: bytes) -> None:
     """Persist an uploaded artifact from the worker and update progress."""
     if job.type == "design" and field == "reference_audio":
-        storage.write_bytes(storage.voice_reference_rel(job.voice_id), data)
+        storage.write_bytes(storage.voice_preview_rel(job.voice_id), data)
         job.progress = 50
     elif job.type == "clone_prompt" and field == "prompt_pt":
         storage.write_bytes(storage.voice_prompt_rel(job.voice_id), data)
@@ -139,7 +139,10 @@ def complete_job(
         voice = db.get(Voice, job.voice_id)
         if voice is not None and voice.status == "designing":
             voice.status = "preview_ready"
-            voice.reference_audio_path = storage.voice_reference_rel(voice.id)
+            # The approved reference/prompt are intentionally untouched: a
+            # redesign preview lives at the draft preview path and is only
+            # promoted to the live reference when the replacement is approved
+            # (see approve_voice).
     elif job.type == "clone_prompt":
         voice = db.get(Voice, job.voice_id)
         if voice is not None and voice.status == "approving":
@@ -198,7 +201,12 @@ def _mark_failed_owner_object(db: Session, job: Job, error: str) -> None:
     elif job.type == "design" and job.voice_id:
         voice = db.get(Voice, job.voice_id)
         if voice is not None and voice.status == "designing":
-            voice.status = "draft"
+            if voice.reference_audio_path and voice.prompt_pt_path:
+                # A failed redesign of an approved voice restores the approved
+                # state so its saved reference/prompt keep working.
+                voice.status = "approved"
+            else:
+                voice.status = "draft"
     elif job.type == "clone_prompt" and job.voice_id:
         voice = db.get(Voice, job.voice_id)
         if voice is not None and voice.status == "approving":

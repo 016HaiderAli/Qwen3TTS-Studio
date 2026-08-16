@@ -79,6 +79,11 @@ class Voice(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
+    @property
+    def has_approved_prompt(self) -> bool:
+        """True when the voice has a saved clone prompt usable for narration."""
+        return bool(self.prompt_pt_path)
+
     owner: Mapped["User"] = relationship(back_populates="voices")
     narrations: Mapped[list["Narration"]] = relationship(
         back_populates="voice", cascade="all, delete-orphan"

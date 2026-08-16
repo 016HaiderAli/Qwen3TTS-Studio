@@ -28,6 +28,18 @@ def _get_owned_voice(db: Session, voice_id: str, user: User) -> Voice:
     return voice
 
 
+def _has_preview_audio(voice: Voice) -> bool:
+    """Whether a preview is available to approve.
+
+    A fresh design writes to the draft preview path; after a promotion (or an
+    approval retry after a failed clone) the live reference already holds the
+    approved audio. Either satisfies the check.
+    """
+    if storage.safe_resolve(storage.voice_preview_rel(voice.id)) is not None:
+        return True
+    return storage.safe_resolve(voice.reference_audio_path) is not None
+
+
 @router.get("", response_model=list[VoiceResponse])
 def list_voices(
     user: User = Depends(get_current_user),
@@ -80,6 +92,11 @@ def design_voice(
     db: Session = Depends(get_db),
 ):
     voice = _get_owned_voice(db, voice_id, user)
+    if voice.status in ("designing", "approving"):
+        raise HTTPException(
+            status_code=409,
+            detail="A design or approval is already in progress for this voice.",
+        )
     if body.language not in settings.supported_languages:
         raise HTTPException(status_code=422, detail="Unsupported language.")
     voice.description = body.description.strip()
@@ -118,7 +135,7 @@ def approve_voice(
             status_code=409,
             detail="Voice must have a generated preview before approval.",
         )
-    if not voice.reference_audio_path:
+    if not _has_preview_audio(voice):
         raise HTTPException(status_code=409, detail="No preview audio available.")
     claimed = db.execute(
         update(Voice)
@@ -131,6 +148,14 @@ def approve_voice(
             status_code=409,
             detail="Approval is already in progress.",
         )
+    # Promote the preview the user just approved into the live reference slot
+    # BEFORE building the clone payload, so the new prompt is built from exactly
+    # this audio and the previously approved reference is superseded here.
+    promoted = storage.promote_preview_to_reference(voice.id)
+    db.execute(
+        update(Voice).where(Voice.id == voice.id).values(reference_audio_path=promoted)
+    )
+    db.refresh(voice)
     payload = job_service.clone_prompt_payload(voice)
     job_service.enqueue(
         db,

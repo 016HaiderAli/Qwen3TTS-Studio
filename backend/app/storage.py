@@ -4,6 +4,7 @@ Implements the local-storage layout from docs/MVP_ARCHITECTURE.md section 6.4.
 Paths stored in the database are always relative to the storage root and are
 validated on resolution to prevent path traversal.
 """
+import os
 from pathlib import Path
 
 from .config import get_settings
@@ -66,6 +67,30 @@ def ensure_layout() -> None:
 
 def voice_reference_rel(voice_id: str) -> str:
     return f"voices/{voice_id}/reference.wav"
+
+
+def voice_preview_rel(voice_id: str) -> str:
+    return f"voices/{voice_id}/preview.wav"
+
+
+def promote_preview_to_reference(voice_id: str) -> str:
+    """Make the current draft preview the voice's live reference.
+
+    Called when an approval is initiated: the preview the user approved becomes
+    the reference audio the new clone prompt is built from. If no draft preview
+    exists (e.g. an approval retry after a failed clone), the previously
+    promoted reference is already the live one and is left in place.
+
+    Returns the relative reference path.
+    """
+    preview = _root() / voice_preview_rel(voice_id)
+    live = _root() / voice_reference_rel(voice_id)
+    live.parent.mkdir(parents=True, exist_ok=True)
+    if preview.exists():
+        os.replace(preview, live)
+    elif not live.exists():
+        raise FileNotFoundError(voice_preview_rel(voice_id))
+    return voice_reference_rel(voice_id)
 
 
 def voice_prompt_rel(voice_id: str) -> str:

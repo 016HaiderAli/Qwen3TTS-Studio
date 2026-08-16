@@ -104,13 +104,11 @@ def create_narration(
     ).scalar_one_or_none()
     if voice is None:
         raise HTTPException(status_code=404, detail="Voice not found.")
-    if voice.status != "approved":
+    if not voice.prompt_pt_path:
         raise HTTPException(
             status_code=409,
-            detail="Voice must be approved (clone prompt ready) before narration.",
+            detail="Voice must have an approved clone prompt before narration.",
         )
-    if not voice.prompt_pt_path:
-        raise HTTPException(status_code=409, detail="Voice has no clone prompt.")
 
     script = body.script.strip()
     if not script:

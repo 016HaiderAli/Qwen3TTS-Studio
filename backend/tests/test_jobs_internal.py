@@ -206,6 +206,48 @@ def test_design_job_lifecycle(client, dev_login, make_wav_bytes):
     assert audio.headers["content-type"] == "audio/wav"
 
 
+def test_design_artifact_written_to_preview_path(client, dev_login, make_wav_bytes):
+    """Design artifacts land in the draft preview path, never the approved
+    reference slot, so an approved reference is never overwritten by a redesign."""
+    dev_login("alice@example.com")
+    voice = _create_voice(client)
+    _design(client, voice["id"])
+
+    claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    assert claim["type"] == "design"
+    wav = make_wav_bytes()
+    resp = client.post(
+        f"/internal/jobs/{claim['job_id']}/artifact",
+        headers=WORKER_AUTH,
+        data={"field": "reference_audio"},
+        files={"file": ("ref.wav", wav, "application/octet-stream")},
+    )
+    assert resp.status_code == 200, resp.text
+
+    preview = storage.root() / storage.voice_preview_rel(voice["id"])
+    live = storage.root() / storage.voice_reference_rel(voice["id"])
+    assert preview.is_file()
+    assert preview.read_bytes() == wav
+    assert not live.exists()
+
+    resp = client.post(
+        f"/internal/jobs/{claim['job_id']}/complete",
+        headers=WORKER_AUTH,
+        json={"sample_rate": 24000, "durations": [1.0]},
+    )
+    assert resp.status_code == 200
+
+    with SessionLocal() as db:
+        v = db.get(Voice, voice["id"])
+        assert v.status == "preview_ready"
+        assert v.reference_audio_path is None
+
+    # the reference endpoint serves the draft preview
+    audio = client.get(f"/api/files/voices/{voice['id']}/reference")
+    assert audio.status_code == 200
+    assert audio.content == wav
+
+
 def test_fail_retries_then_marks_failed(client, dev_login):
     dev_login("alice@example.com")
     voice = _create_voice(client)

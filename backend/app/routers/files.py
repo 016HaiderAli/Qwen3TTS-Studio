@@ -1,4 +1,6 @@
 """Authenticated audio file streaming (playback and WAV download)."""
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -28,6 +30,31 @@ def _stream(path, filename: str, download: bool):
     )
 
 
+def _reference_audio(voice: Voice) -> Path | None:
+    """Choose the audio to stream for a voice.
+
+    - approved: the live reference (the preview that was promoted on approval).
+    - preview_ready: the current draft preview candidate; falls back to the
+      live reference when a promotion already happened (e.g. approval retry).
+    - designing/approving: keep the saved approved reference streamable while a
+      redesign runs, so the voice stays usable; otherwise the draft preview.
+    """
+    if voice.status == "approved":
+        return storage.safe_resolve(voice.reference_audio_path)
+    if voice.status == "preview_ready":
+        preview = storage.safe_resolve(storage.voice_preview_rel(voice.id))
+        if preview is not None:
+            return preview
+        return storage.safe_resolve(voice.reference_audio_path)
+    if voice.status in ("designing", "approving"):
+        if voice.reference_audio_path:
+            saved = storage.safe_resolve(voice.reference_audio_path)
+            if saved is not None:
+                return saved
+        return storage.safe_resolve(storage.voice_preview_rel(voice.id))
+    return None
+
+
 @router.get("/voices/{voice_id}/reference")
 def voice_reference(
     voice_id: str,
@@ -40,7 +67,7 @@ def voice_reference(
     ).scalar_one_or_none()
     if voice is None:
         raise HTTPException(status_code=404, detail="Voice not found.")
-    path = storage.safe_resolve(voice.reference_audio_path)
+    path = _reference_audio(voice)
     return _stream(path, f"{voice.name}-reference.wav", download)
 
 

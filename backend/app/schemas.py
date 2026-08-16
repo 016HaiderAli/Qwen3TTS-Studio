@@ -37,6 +37,7 @@ class VoiceResponse(BaseModel):
     description: str
     reference_text: str
     status: str
+    has_approved_prompt: bool
     created_at: datetime
     updated_at: datetime
 

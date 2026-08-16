@@ -43,6 +43,32 @@ def test_create_narration_requires_approved_voice(client, dev_login):
     assert resp.status_code == 409
 
 
+def test_narration_allowed_while_voice_being_redesigned(client, dev_login):
+    """An approved voice stays usable for narration while a redesign runs,
+    because its saved clone prompt remains intact."""
+    dev_login("alice@example.com")
+    me = client.get("/api/me").json()
+    voice_id = _approved_voice(me["id"])
+
+    resp = client.post(
+        f"/api/voices/{voice_id}/design",
+        json={
+            "description": "New voice.",
+            "reference_text": "New reference text.",
+            "language": "English",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "designing"
+    assert resp.json()["has_approved_prompt"] is True
+
+    resp = client.post(
+        "/api/narrations", json={"voice_id": voice_id, "script": "Hello there."}
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["status"] == "queued"
+
+
 def test_create_narration_enqueues_job(client, dev_login):
     dev_login("alice@example.com")
     me = client.get("/api/me").json()
