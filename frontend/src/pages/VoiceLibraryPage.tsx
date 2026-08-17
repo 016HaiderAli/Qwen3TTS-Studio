@@ -85,6 +85,7 @@ export function VoiceLibraryPage() {
   const prevStatusRef = useRef<Record<string, string>>({})
   const seededRef = useRef(false)
   const navigate = useNavigate()
+  const lastTriggerRef = useRef<HTMLElement | null>(null)
 
   const load = async () => {
     try {
@@ -94,6 +95,36 @@ export function VoiceLibraryPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const retryLoad = async () => {
+    setError('')
+    setLoading(true)
+    await load()
+  }
+
+  const openCreate = () => {
+    lastTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setCreateOpen(true)
+  }
+
+  const closeCreate = () => {
+    setCreateOpen(false)
+    lastTriggerRef.current?.focus()
+    lastTriggerRef.current = null
+  }
+
+  const openDesign = (voice: Voice) => {
+    lastTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setDesignTarget(voice)
+  }
+
+  const closeDesign = () => {
+    setDesignTarget(null)
+    lastTriggerRef.current?.focus()
+    lastTriggerRef.current = null
   }
 
   useEffect(() => {
@@ -168,25 +199,34 @@ export function VoiceLibraryPage() {
     <section>
       <div className="page-head">
         <h2>Voice Library</h2>
-        <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>
+        <button className="btn btn-primary" onClick={openCreate}>
           New voice
         </button>
       </div>
       <div role="status" aria-live="polite" className="sr-only">
         {announcement}
       </div>
-      {error && <p className="error-banner">{error}</p>}
+      {error && (
+        <div className="error-banner error-banner-row">
+          <span>{error}</span>
+          <button className="btn" onClick={() => void retryLoad()}>
+            Retry
+          </button>
+        </div>
+      )}
       {loading ? (
         <p className="muted">Loading…</p>
       ) : voices.length === 0 ? (
-        <div className="empty-state">
-          <p className="muted">
-            No voices yet. Create a voice, then generate a design preview.
-          </p>
-          <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-            Create your first voice
-          </button>
-        </div>
+        error ? null : (
+          <div className="empty-state">
+            <p className="muted">
+              No voices yet. Create a voice, then generate a design preview.
+            </p>
+            <button className="btn btn-primary" onClick={openCreate}>
+              Create your first voice
+            </button>
+          </div>
+        )
       ) : (
         <div className="voice-grid">
           {voices.map((voice) => (
@@ -195,7 +235,7 @@ export function VoiceLibraryPage() {
               voice={voice}
               highlighted={voice.id === highlightId}
               approvePending={approvingId === voice.id}
-              onDesign={() => setDesignTarget(voice)}
+              onDesign={() => openDesign(voice)}
               onApprove={() => void approve(voice)}
               onDelete={() => void remove(voice)}
               onUse={() => navigate(`/narration?voice=${voice.id}`)}
@@ -205,13 +245,13 @@ export function VoiceLibraryPage() {
       )}
       {createOpen && (
         <NewVoiceModal
-          onClose={() => setCreateOpen(false)}
+          onClose={closeCreate}
           onDone={() => {
-            setCreateOpen(false)
+            closeCreate()
             void load()
           }}
           onDraft={(voice) => {
-            setCreateOpen(false)
+            closeCreate()
             setVoices((prev) =>
               prev.some((v) => v.id === voice.id) ? prev : [voice, ...prev],
             )
@@ -222,10 +262,10 @@ export function VoiceLibraryPage() {
       {designTarget && (
         <DesignVoiceModal
           voice={designTarget}
-          onClose={() => setDesignTarget(null)}
+          onClose={closeDesign}
           onSubmitted={(updated) => {
             setVoices((prev) => prev.map((v) => (v.id === updated.id ? updated : v)))
-            setDesignTarget(null)
+            closeDesign()
           }}
           onError={(msg) => setError(msg)}
         />
@@ -251,6 +291,14 @@ function NewVoiceModal({
   const [referenceText, setReferenceText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [busy, onClose])
 
   const canSubmit = name.trim() && description.trim() && referenceText.trim() && !busy
 
@@ -288,8 +336,14 @@ function NewVoiceModal({
 
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h3>Create & design voice</h3>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-voice-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 id="new-voice-modal-title">Create &amp; design voice</h3>
         <form onSubmit={submit}>
           <div className="field">
             <span className="field-title">Voice name</span>
@@ -594,6 +648,14 @@ function DesignVoiceModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [busy, onClose])
+
   const canSubmit = description.trim() && referenceText.trim() && !busy
 
   const submit = async (e: React.FormEvent) => {
@@ -619,8 +681,14 @@ function DesignVoiceModal({
 
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h3>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="design-voice-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 id="design-voice-modal-title">
           {voice.has_approved_prompt ? 'Redesign voice' : 'Design voice'} — {voice.name}
         </h3>
         {voice.has_approved_prompt && (

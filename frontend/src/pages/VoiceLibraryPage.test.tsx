@@ -555,3 +555,183 @@ describe('VoiceLibraryPage — non-destructive redesign', () => {
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
   })
 })
+
+describe('VoiceLibraryPage — load failure & retry', () => {
+  const failingHandler = (url: string) =>
+    url.endsWith('/api/voices')
+      ? jsonResponse(500, { detail: 'Voice service unavailable.' })
+      : jsonResponse(404, {})
+
+  it('shows the error banner with Retry and not the empty state when the initial load fails', async () => {
+    mockApi(failingHandler)
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByText('Voice service unavailable.')).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.queryByText(/No voices yet/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Create your first voice' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('re-runs the load on Retry, clears the error, and renders voices on success', async () => {
+    let fail = true
+    let getCalls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        getCalls++
+        return fail
+          ? jsonResponse(500, { detail: 'Voice service unavailable.' })
+          : jsonResponse(200, [draftVoice])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    expect(getCalls).toBe(1)
+    fail = false
+    const user = userEvent.setup()
+    await user.click(retry)
+    await waitFor(() =>
+      expect(screen.queryByText('Voice service unavailable.')).not.toBeInTheDocument(),
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Design voice' })).toBeInTheDocument(),
+    )
+    expect(getCalls).toBe(2)
+  })
+
+  it('shows the empty state and CTA after a successful load with zero voices', async () => {
+    mockApi(emptyVoicesHandler)
+    renderPage()
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Create your first voice' }),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/No voices yet/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+})
+
+describe('VoiceLibraryPage — modal accessibility', () => {
+  const draftCardHandler = (url: string) =>
+    url.endsWith('/api/voices') ? jsonResponse(200, [draftVoice]) : jsonResponse(404, {})
+
+  it('gives NewVoiceModal an aria-labelledby pointing to its heading', async () => {
+    const user = userEvent.setup()
+    mockApi(emptyVoicesHandler)
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'New voice' }))
+    const dialog = screen.getByRole('dialog')
+    const labelledBy = dialog.getAttribute('aria-labelledby')
+    expect(labelledBy).toBeTruthy()
+    expect(document.getElementById(String(labelledBy))).toHaveTextContent('Create & design voice')
+  })
+
+  it('closes NewVoiceModal on Escape when idle', async () => {
+    const user = userEvent.setup()
+    mockApi(emptyVoicesHandler)
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'New voice' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('does not close NewVoiceModal on Escape while creating is in progress', async () => {
+    let resolveCreate!: (resp: Response) => void
+    const createPromise = new Promise<Response>((res) => {
+      resolveCreate = res
+    })
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/voices') && method === 'POST') return createPromise
+      if (url.endsWith('/api/voices') && method === 'GET') return jsonResponse(200, [])
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await fillCreateForm()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Create voice & generate preview' }))
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await act(async () => {
+      resolveCreate(jsonResponse(201, draftVoice))
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('restores focus to the New voice trigger when the create modal closes', async () => {
+    const user = userEvent.setup()
+    mockApi(emptyVoicesHandler)
+    renderPage()
+    const trigger = await screen.findByRole('button', { name: 'New voice' })
+    await user.click(trigger)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+  })
+
+  it('gives DesignVoiceModal an aria-labelledby pointing to its heading', async () => {
+    const user = userEvent.setup()
+    mockApi(draftCardHandler)
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Design voice' }))
+    const dialog = screen.getByRole('dialog')
+    const labelledBy = dialog.getAttribute('aria-labelledby')
+    expect(labelledBy).toBeTruthy()
+    expect(document.getElementById(String(labelledBy))).toHaveTextContent(
+      'Design voice — Narrator',
+    )
+  })
+
+  it('closes DesignVoiceModal on Escape when idle', async () => {
+    const user = userEvent.setup()
+    mockApi(draftCardHandler)
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Design voice' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('does not close DesignVoiceModal on Escape while designing is in progress', async () => {
+    let resolveDesign!: (resp: Response) => void
+    const designPromise = new Promise<Response>((res) => {
+      resolveDesign = res
+    })
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/voices') && method === 'GET') return jsonResponse(200, [draftVoice])
+      if (url.endsWith('/api/voices/v1/design') && method === 'POST') return designPromise
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Design voice' }))
+    await user.type(screen.getByLabelText(/^voice description$/i), 'A calm voice')
+    await user.type(screen.getByLabelText(/^reference text$/i), 'Hello world')
+    await user.click(screen.getByRole('button', { name: 'Generate preview' }))
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await act(async () => {
+      resolveDesign(jsonResponse(200, { ...draftVoice, status: 'designing' }))
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('restores focus to the Design voice trigger when the design modal closes', async () => {
+    const user = userEvent.setup()
+    mockApi(draftCardHandler)
+    renderPage()
+    const trigger = await screen.findByRole('button', { name: 'Design voice' })
+    await user.click(trigger)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+  })
+})
