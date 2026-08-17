@@ -10,6 +10,10 @@ export function HistoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [announcement, setAnnouncement] = useState('')
+  const [errorDetailId, setErrorDetailId] = useState<string | null>(null)
+  const [errorDetailBody, setErrorDetailBody] = useState<Record<string, string>>({})
+  const [errorDetailFailure, setErrorDetailFailure] = useState<Record<string, string>>({})
+  const errorDetailLoadingRef = useRef<Set<string>>(new Set())
   const announcedRef = useRef<Set<string>>(new Set())
   const seededRef = useRef(false)
 
@@ -20,6 +24,37 @@ export function HistoryPage() {
       setError(err instanceof ApiError ? err.message : 'Failed to load history.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const retryLoad = async () => {
+    setError('')
+    setLoading(true)
+    await load()
+  }
+
+  const toggleErrorDetails = async (id: string) => {
+    if (errorDetailId === id) {
+      setErrorDetailId(null)
+      return
+    }
+    setErrorDetailId(id)
+    if (errorDetailBody[id] !== undefined || errorDetailFailure[id] !== undefined) return
+    if (errorDetailLoadingRef.current.has(id)) return
+    errorDetailLoadingRef.current.add(id)
+    try {
+      const narration = await api.getNarration(id)
+      setErrorDetailBody((prev) => ({
+        ...prev,
+        [id]: narration.error ?? 'No error message provided.',
+      }))
+    } catch (err) {
+      setErrorDetailFailure((prev) => ({
+        ...prev,
+        [id]: err instanceof ApiError ? err.message : 'Could not load error details.',
+      }))
+    } finally {
+      errorDetailLoadingRef.current.delete(id)
     }
   }
 
@@ -77,12 +112,22 @@ export function HistoryPage() {
       <div role="status" aria-live="polite" className="sr-only">
         {announcement}
       </div>
-      {error && <p className="error-banner">{error}</p>}
+      {error && (
+        <div className="error-banner error-banner-row">
+          <span>{error}</span>
+          <button className="btn" onClick={() => void retryLoad()}>
+            Retry
+          </button>
+        </div>
+      )}
       {loading ? (
         <p className="muted">Loading…</p>
       ) : items.length === 0 ? (
         <div className="empty-state">
           <p className="muted">No narrations yet. Create one from the studio.</p>
+          <Link to="/narration" className="btn btn-primary">
+            Create a narration
+          </Link>
         </div>
       ) : (
         <ul className="history-list">
@@ -124,12 +169,36 @@ export function HistoryPage() {
                     Reuse in studio
                   </Link>
                 )}
+                {item.status === 'failed' && (
+                  <button
+                    className="btn"
+                    aria-expanded={errorDetailId === item.id}
+                    aria-controls={`narration-error-${item.id}`}
+                    onClick={() => void toggleErrorDetails(item.id)}
+                  >
+                    Error details
+                  </button>
+                )}
                 <button
                   className="btn btn-ghost"
                   onClick={() => void remove(item.id, item.title)}
                 >
                   Delete
                 </button>
+                {item.status === 'failed' && errorDetailId === item.id && (
+                  <div
+                    id={`narration-error-${item.id}`}
+                    className="history-error-detail"
+                  >
+                    {errorDetailFailure[item.id] !== undefined ? (
+                      <p className="error-banner">{errorDetailFailure[item.id]}</p>
+                    ) : errorDetailBody[item.id] !== undefined ? (
+                      <p className="muted">{errorDetailBody[item.id]}</p>
+                    ) : (
+                      <p className="muted">Loading error details…</p>
+                    )}
+                  </div>
+                )}
               </li>
             )
           })}

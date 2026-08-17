@@ -168,3 +168,197 @@ describe('HistoryPage — reuse in studio', () => {
     )
   })
 })
+
+describe('HistoryPage — empty state & initial-load retry', () => {
+  it('shows an empty state with a Create a narration CTA linking to the studio', async () => {
+    mockApi((url) =>
+      url.endsWith('/api/narrations') ? jsonResponse(200, []) : jsonResponse(404, {}),
+    )
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/No narrations yet/)).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: 'Create a narration' })).toHaveAttribute(
+      'href',
+      '/narration',
+    )
+  })
+
+  it('shows a Retry action on initial-load failure that re-runs the load', async () => {
+    let calls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/narrations')) {
+        calls++
+        if (calls === 1) return jsonResponse(500, { detail: 'boom' })
+        return jsonResponse(200, [readyItem])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('boom')).toBeInTheDocument())
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Download' })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('boom')).not.toBeInTheDocument()
+    expect(calls).toBe(2)
+  })
+})
+
+describe('HistoryPage — failed narration error details', () => {
+  const failedItem = { ...queuedItem, status: 'failed' }
+  const failedNarration = {
+    id: 'n1',
+    voice_id: 'v1',
+    title: 'My narration',
+    script: 'Hello world',
+    delivery_direction: '',
+    language: 'English',
+    status: 'failed',
+    chunk_count: 1,
+    chunks_done: 0,
+    duration_sec: null,
+    sample_rate: null,
+    error: 'GPU worker timed out.',
+    created_at: '2026-01-01T00:00:00Z',
+  }
+
+  it('expands on demand, fetches the detail endpoint and shows the error inline', async () => {
+    let detailCalls = 0
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/narrations') && method === 'GET') {
+        return jsonResponse(200, [failedItem])
+      }
+      if (url.endsWith('/api/narrations/n1')) {
+        detailCalls++
+        return jsonResponse(200, failedNarration)
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Error details' })).toBeInTheDocument(),
+    )
+    const btn = screen.getByRole('button', { name: 'Error details' })
+    expect(btn).toHaveAttribute('aria-expanded', 'false')
+    expect(btn).toHaveAttribute('aria-controls', 'narration-error-n1')
+    const user = userEvent.setup()
+    await user.click(btn)
+    await waitFor(() => expect(screen.getByText('GPU worker timed out.')).toBeInTheDocument())
+    expect(detailCalls).toBe(1)
+    expect(btn).toHaveAttribute('aria-expanded', 'true')
+    expect(document.getElementById('narration-error-n1')).toHaveTextContent(
+      'GPU worker timed out.',
+    )
+    expect(liveRegion()).not.toHaveTextContent('GPU worker timed out.')
+  })
+
+  it('collapses on a second click', async () => {
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/narrations') && method === 'GET') {
+        return jsonResponse(200, [failedItem])
+      }
+      if (url.endsWith('/api/narrations/n1')) return jsonResponse(200, failedNarration)
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Error details' })).toBeInTheDocument(),
+    )
+    const user = userEvent.setup()
+    const btn = screen.getByRole('button', { name: 'Error details' })
+    await user.click(btn)
+    await waitFor(() => expect(screen.getByText('GPU worker timed out.')).toBeInTheDocument())
+    await user.click(btn)
+    await waitFor(() =>
+      expect(screen.queryByText('GPU worker timed out.')).not.toBeInTheDocument(),
+    )
+    expect(btn).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('does not fire duplicate detail requests on rapid repeated clicks', async () => {
+    let resolveDetail: (r: Response) => void
+    const detailPromise = new Promise<Response>((resolve) => {
+      resolveDetail = resolve
+    })
+    let detailCalls = 0
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/narrations') && method === 'GET') {
+        return jsonResponse(200, [failedItem])
+      }
+      if (url.endsWith('/api/narrations/n1')) {
+        detailCalls++
+        return detailPromise
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Error details' })).toBeInTheDocument(),
+    )
+    const user = userEvent.setup()
+    const btn = screen.getByRole('button', { name: 'Error details' })
+    await user.click(btn)
+    await user.click(btn)
+    await user.click(btn)
+    resolveDetail!(jsonResponse(200, failedNarration))
+    await flushPromises()
+    expect(detailCalls).toBe(1)
+    await waitFor(() => expect(screen.getByText('GPU worker timed out.')).toBeInTheDocument())
+  })
+
+  it('handles a failure while loading error details gracefully', async () => {
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/narrations') && method === 'GET') {
+        return jsonResponse(200, [failedItem])
+      }
+      if (url.endsWith('/api/narrations/n1')) {
+        return jsonResponse(500, { detail: 'Detail fetch failed.' })
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Error details' })).toBeInTheDocument(),
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Error details' }))
+    await waitFor(() => expect(screen.getByText('Detail fetch failed.')).toBeInTheDocument())
+  })
+})
+
+describe('HistoryPage — regression', () => {
+  it('keeps ready-row playback, download and reuse intact', async () => {
+    mockApi((url) =>
+      url.endsWith('/api/narrations') ? jsonResponse(200, [readyItem]) : jsonResponse(404, {}),
+    )
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Download' })).toBeInTheDocument(),
+    )
+    expect(
+      screen.getByRole('group', { name: 'Audio player: My narration' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Reuse in studio' })).toHaveAttribute(
+      'href',
+      '/narration?reuse=n1&voice=v1',
+    )
+    expect(screen.queryByRole('button', { name: 'Error details' })).not.toBeInTheDocument()
+  })
+
+  it('keeps failed-row reuse intact without a detail panel until requested', async () => {
+    const failedItem = { ...queuedItem, status: 'failed' }
+    mockApi((url) =>
+      url.endsWith('/api/narrations') ? jsonResponse(200, [failedItem]) : jsonResponse(404, {}),
+    )
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Reuse in studio' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Error details' })).toBeInTheDocument()
+    expect(screen.queryByText('GPU worker timed out.')).not.toBeInTheDocument()
+  })
+})
