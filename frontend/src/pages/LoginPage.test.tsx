@@ -47,5 +47,6 @@ describe('LoginPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/Google authentication is not configured/)).toBeInTheDocument()
     })
+    expect(screen.getByRole('alert')).toHaveTextContent(/Google authentication is not configured/)
   })
 })

@@ -568,6 +568,7 @@ describe('VoiceLibraryPage — load failure & retry', () => {
     await waitFor(() =>
       expect(screen.getByText('Voice service unavailable.')).toBeInTheDocument(),
     )
+    expect(screen.getByRole('alert')).toHaveTextContent('Voice service unavailable.')
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
     expect(screen.queryByText(/No voices yet/)).not.toBeInTheDocument()
     expect(

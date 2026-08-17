@@ -539,3 +539,63 @@ describe('NarrationStudioPage — reuse from history', () => {
     expect((screen.getByLabelText(/^Voice$/) as HTMLSelectElement).value).toBe('v1')
   })
 })
+
+describe('NarrationStudioPage — voice-list load failure & retry', () => {
+  it('shows a load-error banner with Retry and not the no-approved-voices state on voice-list failure', async () => {
+    let calls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        calls++
+        return jsonResponse(500, { detail: 'Voice service unavailable.' })
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    expect(screen.getByText('Voice service unavailable.')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Voice service unavailable.')
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'No approved voices yet' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('No approved voices yet')).not.toBeInTheDocument()
+    expect(calls).toBe(1)
+  })
+
+  it('re-runs the voice load on Retry and populates the voice select on success', async () => {
+    let calls = 0
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) {
+        calls++
+        return calls === 1
+          ? jsonResponse(500, { detail: 'Voice service unavailable.' })
+          : jsonResponse(200, [approvedVoice])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await flushPromises()
+    expect(screen.queryByText('Voice service unavailable.')).not.toBeInTheDocument()
+    expect((screen.getByLabelText(/^Voice$/) as HTMLSelectElement).value).toBe('v1')
+    expect(calls).toBe(2)
+  })
+
+  it('shows the no-approved-voices state only after a successful load with zero usable voices', async () => {
+    const draft = { ...approvedVoice, status: 'draft', has_approved_prompt: false }
+    mockApi((url) => {
+      if (url.endsWith('/api/voices')) return jsonResponse(200, [draft])
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    await flushPromises()
+    expect(
+      screen.getByRole('heading', { name: 'No approved voices yet' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Go to voice library' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})

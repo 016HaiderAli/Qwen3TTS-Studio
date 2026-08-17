@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
-import { api, ApiError, type Me } from './api'
+import { api, ApiError, SESSION_EXPIRED_EVENT, type Me } from './api'
 import { LoginPage } from './pages/LoginPage'
 import { VoiceLibraryPage } from './pages/VoiceLibraryPage'
 import { NarrationStudioPage } from './pages/NarrationStudioPage'
@@ -26,10 +26,24 @@ export default function App() {
     void refreshMe()
   }, [refreshMe])
 
+  // A session that dies mid-use (expired token, server restart, cleared cookie)
+  // is reported by the API client; drop the current user so the login screen
+  // renders instead of leaving pages stuck on auth-error banners.
+  useEffect(() => {
+    const onSessionExpired = () => setMe(null)
+    window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired)
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onSessionExpired)
+  }, [])
+
   const logout = async () => {
-    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' })
-    setMe(null)
-    navigate('/')
+    try {
+      await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' })
+    } catch {
+      // Network failure: still clear the local session so the user is not stuck.
+    } finally {
+      setMe(null)
+      navigate('/')
+    }
   }
 
   if (loading) {

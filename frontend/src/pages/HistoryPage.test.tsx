@@ -180,9 +180,10 @@ describe('HistoryPage — empty state & initial-load retry', () => {
       'href',
       '/narration',
     )
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
-  it('shows a Retry action on initial-load failure that re-runs the load', async () => {
+  it('shows a Retry action on initial-load failure without the empty-state CTA', async () => {
     let calls = 0
     mockApi((url) => {
       if (url.endsWith('/api/narrations')) {
@@ -194,6 +195,9 @@ describe('HistoryPage — empty state & initial-load retry', () => {
     })
     renderPage()
     await waitFor(() => expect(screen.getByText('boom')).toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent('boom')
+    expect(screen.queryByText(/No narrations yet/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Create a narration' })).not.toBeInTheDocument()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     await waitFor(() =>

@@ -207,7 +207,7 @@ export function VoiceLibraryPage() {
         {announcement}
       </div>
       {error && (
-        <div className="error-banner error-banner-row">
+        <div className="error-banner error-banner-row" role="alert">
           <span>{error}</span>
           <button className="btn" onClick={() => void retryLoad()}>
             Retry

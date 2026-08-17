@@ -35,7 +35,11 @@ export function LoginPage() {
         >
           {busy ? 'Redirecting…' : 'Continue with Google'}
         </button>
-        {error && <p className="error-banner">{error}</p>}
+        {error && (
+          <p className="error-banner" role="alert">
+            {error}
+          </p>
+        )}
         <p className="login-hint">
           Demo mode: ask the server operator to enable the development login
           (DEV_LOGIN=1) for a test sign-in.

@@ -9,6 +9,15 @@ export class ApiError extends Error {
   }
 }
 
+// Fired when an authenticated request fails with 401/403 outside the initial
+// sign-in check, so the app can clear the current user and return to the login
+// screen instead of leaving pages stuck on "You are not signed in." banners.
+export const SESSION_EXPIRED_EVENT = 'session-expired'
+
+// Suppresses repeated events while the same dead session is being polled. The
+// flag is reset on a successful sign-in check (/api/me).
+let expiredNotified = false
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     credentials: 'same-origin',
@@ -16,6 +25,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   })
   if (resp.status === 401 || resp.status === 403) {
+    // The initial /api/me check reports "not signed in" as a normal state; a
+    // 401/403 on any other request means the session died mid-use.
+    if (!path.endsWith('/api/me') && !expiredNotified) {
+      expiredNotified = true
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+    }
     throw new ApiError(resp.status, 'You are not signed in.')
   }
   if (resp.status === 204) {
@@ -31,6 +46,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(resp.status, detail)
   }
+  if (path.endsWith('/api/me')) expiredNotified = false
   return resp.json() as Promise<T>
 }
 

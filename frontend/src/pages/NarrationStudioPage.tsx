@@ -34,6 +34,7 @@ export function NarrationStudioPage() {
   const [delivery, setDelivery] = useState('')
   const [language, setLanguage] = useState('English')
   const [loadingVoices, setLoadingVoices] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const languageTouchedRef = useRef(false)
 
   const [narration, setNarration] = useState<Narration | null>(null)
@@ -45,7 +46,10 @@ export function NarrationStudioPage() {
   const scrolledRef = useRef<Set<string>>(new Set())
   const pollRef = useRef<number | null>(null)
 
-  useEffect(() => {
+  // Loads the approved voices and (optionally) the narration to reuse, then
+  // preselects a voice. Re-runs whenever the ?voice= / ?reuse= params change
+  // and can be triggered again from the load-error Retry action.
+  const load = useCallback(async () => {
     const selectVoice = (rows: Voice[], preferred?: string | null) => {
       const approved = rows.filter((v) => v.has_approved_prompt)
       if (preferred) {
@@ -54,51 +58,59 @@ export function NarrationStudioPage() {
       }
       return approved[0] ?? null
     }
-    void (async () => {
-      try {
-        const rows = await api.listVoices()
-        setVoices(rows)
-        const syncLanguage = (voice: Voice) => {
-          if (!languageTouchedRef.current) setLanguage(voice.language)
-        }
-        if (reuseId) {
-          try {
-            const reuse = await api.getNarration(reuseId)
-            setTitle(reuse.title)
-            setScript(reuse.script)
-            setDelivery(reuse.delivery_direction)
-            setLanguage(reuse.language)
-            languageTouchedRef.current = true
-            const voice = selectVoice(rows, preselect ?? reuse.voice_id)
-            if (voice) setVoiceId(voice.id)
-          } catch (err) {
-            setError(
-              err instanceof ApiError && err.status === 404
-                ? 'Narration not found.'
-                : err instanceof ApiError
-                  ? err.message
-                  : 'Could not load the narration to reuse.',
-            )
-            const voice = selectVoice(rows, preselect)
-            if (voice) {
-              setVoiceId(voice.id)
-              syncLanguage(voice)
-            }
-          }
-        } else {
+    setLoadingVoices(true)
+    setLoadError('')
+    try {
+      const rows = await api.listVoices()
+      setVoices(rows)
+      const syncLanguage = (voice: Voice) => {
+        if (!languageTouchedRef.current) setLanguage(voice.language)
+      }
+      if (reuseId) {
+        try {
+          const reuse = await api.getNarration(reuseId)
+          setTitle(reuse.title)
+          setScript(reuse.script)
+          setDelivery(reuse.delivery_direction)
+          setLanguage(reuse.language)
+          languageTouchedRef.current = true
+          const voice = selectVoice(rows, preselect ?? reuse.voice_id)
+          if (voice) setVoiceId(voice.id)
+        } catch (err) {
+          setLoadError(
+            err instanceof ApiError && err.status === 404
+              ? 'Narration not found.'
+              : err instanceof ApiError
+                ? err.message
+                : 'Could not load the narration to reuse.',
+          )
           const voice = selectVoice(rows, preselect)
           if (voice) {
             setVoiceId(voice.id)
             syncLanguage(voice)
           }
         }
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'Failed to load voices.')
-      } finally {
-        setLoadingVoices(false)
+      } else {
+        const voice = selectVoice(rows, preselect)
+        if (voice) {
+          setVoiceId(voice.id)
+          syncLanguage(voice)
+        }
       }
-    })()
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Failed to load voices.')
+    } finally {
+      setLoadingVoices(false)
+    }
   }, [preselect, reuseId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const retryLoad = async () => {
+    await load()
+  }
 
   const announceOnce = useCallback((id: string, status: string, message: string) => {
     const key = `${id}:${status}`
@@ -194,7 +206,19 @@ export function NarrationStudioPage() {
       <div role="status" aria-live="polite" className="sr-only">
         {announcement}
       </div>
-      {error && <p className="error-banner">{error}</p>}
+      {loadError && (
+        <div className="error-banner error-banner-row" role="alert">
+          <span>{loadError}</span>
+          <button className="btn" onClick={() => void retryLoad()}>
+            Retry
+          </button>
+        </div>
+      )}
+      {error && (
+        <p className="error-banner" role="alert">
+          {error}
+        </p>
+      )}
 
       <div className="studio-layout">
         <form
@@ -218,7 +242,7 @@ export function NarrationStudioPage() {
               disabled={loadingVoices || formDisabled}
               required
             >
-              {!loadingVoices && approvedCount === 0 && (
+              {!loadingVoices && !loadError && approvedCount === 0 && (
                 <option value="">No approved voices yet</option>
               )}
               {voices
@@ -325,7 +349,7 @@ export function NarrationStudioPage() {
               />
             </div>
           )}
-          {!loadingVoices && approvedCount === 0 && (
+          {!loadingVoices && !loadError && approvedCount === 0 && (
             <div className="panel">
               <h3>No approved voices yet</h3>
               <p className="muted">

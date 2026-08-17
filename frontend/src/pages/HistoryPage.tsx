@@ -113,7 +113,7 @@ export function HistoryPage() {
         {announcement}
       </div>
       {error && (
-        <div className="error-banner error-banner-row">
+        <div className="error-banner error-banner-row" role="alert">
           <span>{error}</span>
           <button className="btn" onClick={() => void retryLoad()}>
             Retry
@@ -123,12 +123,14 @@ export function HistoryPage() {
       {loading ? (
         <p className="muted">Loading…</p>
       ) : items.length === 0 ? (
-        <div className="empty-state">
-          <p className="muted">No narrations yet. Create one from the studio.</p>
-          <Link to="/narration" className="btn btn-primary">
-            Create a narration
-          </Link>
-        </div>
+        error ? null : (
+          <div className="empty-state">
+            <p className="muted">No narrations yet. Create one from the studio.</p>
+            <Link to="/narration" className="btn btn-primary">
+              Create a narration
+            </Link>
+          </div>
+        )
       ) : (
         <ul className="history-list">
           {items.map((item) => {
