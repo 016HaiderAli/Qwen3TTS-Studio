@@ -50,6 +50,26 @@ def _migrate_jobs_required_backend() -> None:
         )
 
 
+def _migrate_jobs_lease_columns() -> None:
+    """Add the job lease columns (``claimed_at``, ``claim_token``) to an
+    existing jobs table. SQLite ``ALTER TABLE ADD COLUMN`` adds nullable
+    columns; existing rows get NULL, which the stale-recovery treats as stale so
+    a pre-deployment ``running`` job (which has no lease bookkeeping) is still
+    recovered instead of stuck forever.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "jobs" not in insp.get_table_names():
+        return
+    columns = {c["name"] for c in insp.get_columns("jobs")}
+    with engine.begin() as conn:
+        if "claimed_at" not in columns:
+            conn.execute(text("ALTER TABLE jobs ADD COLUMN claimed_at DATETIME"))
+        if "claim_token" not in columns:
+            conn.execute(text("ALTER TABLE jobs ADD COLUMN claim_token VARCHAR(64)"))
+
+
 def init_db() -> None:
     """Create tables and the storage layout if missing."""
     from pathlib import Path
@@ -62,6 +82,7 @@ def init_db() -> None:
         Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     _migrate_jobs_required_backend()
+    _migrate_jobs_lease_columns()
     settings.storage_path.mkdir(parents=True, exist_ok=True)
     voices_dir = settings.storage_path / "voices"
     narrations_dir = settings.storage_path / "narrations"

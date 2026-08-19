@@ -52,6 +52,11 @@ Then open the exposed preview port (the Vite dev server, default `:5173`). Sign
 in with **dev login** (`/auth/dev-login?email=you@example.com`) or configure real
 Google OAuth (below).
 
+`start.sh` runs the **mock worker** by default (`WORKER_BACKEND=mock`) and tags
+web-tier jobs with the same backend via `DEFAULT_JOB_BACKEND`, so the mock
+worker can actually claim them. Set `WORKER_BACKEND=qwen` to run the real GPU
+worker in preview instead; `DEFAULT_JOB_BACKEND` follows it automatically.
+
 ## Real Google login
 
 1. Create an OAuth 2.0 client in [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
@@ -78,6 +83,11 @@ export WORKER_BACKEND=qwen
 python -m qwen_tts_worker.main --backend qwen
 ```
 
+The backend must tag web-tier jobs for the `qwen` worker to claim them: set
+`DEFAULT_JOB_BACKEND=qwen` on the backend (its default). `start.sh` derives this
+from `WORKER_BACKEND`, so a `WORKER_BACKEND=qwen ./start.sh` preview is already
+correct.
+
 With `--backend qwen` the worker first runs GPU environment checks
 (`qwen_tts_worker/checks.py`): torch/CUDA presence and device, the pinned
 `qwen-tts==0.1.1` version and its required API surface, and the configured
@@ -97,7 +107,9 @@ All configuration is environment-driven; copy `.env.example` files and never
 commit `.env`. Key variables:
 
 - Backend: `DATABASE_URL`, `STORAGE_DIR`, `WORKER_TOKEN`, `DEV_LOGIN`,
-  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FRONTEND_URL`, `COOKIE_SECURE`.
+  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FRONTEND_URL`, `COOKIE_SECURE`,
+  `DEFAULT_JOB_BACKEND` (which worker capability can claim web-tier jobs),
+  `JOB_LEASE_SECONDS` (stale `running`-job lease before recovery).
 - Worker: `BACKEND_URL`, `WORKER_TOKEN`, `WORKER_BACKEND=mock|qwen`,
   `QWEN_MODEL_DESIGN`, `QWEN_MODEL_BASE`, `QWEN_DEVICE`, `QWEN_DTYPE`.
 

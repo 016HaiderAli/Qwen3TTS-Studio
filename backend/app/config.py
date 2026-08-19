@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     # (default) means only the real Qwen worker can claim it; set to "mock" to
     # run the whole stack intentionally against the mock worker (dev/tests).
     default_job_backend: str = "qwen"
+    # Stale-job lease. A job that stays "running" for longer than this without
+    # the worker reporting completion/failure is recovered on the next poll:
+    # requeued for another attempt if attempts remain, or failed terminally if
+    # max_job_attempts are exhausted. The worker processes one job at a time and
+    # reports on every request it makes, so a healthy worker refreshes progress
+    # far more often than this; 30 minutes comfortably exceeds a typical
+    # design/clone/narration job while still detecting a dead worker within a
+    # reasonable window. Longer-running deployments should raise it.
+    job_lease_seconds: int = 1800
 
     # --- Limits / validation ---
     max_script_chars: int = 100_000

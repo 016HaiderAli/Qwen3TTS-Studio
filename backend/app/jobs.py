@@ -1,13 +1,23 @@
-"""Job lifecycle: enqueue, claim, artifact handling, completion, failure.
+"""Job lifecycle: enqueue, claim, lease, artifact handling, completion, failure.
 
 The backend process is a single claimer: the worker pulls jobs via the internal
 API and the backend transitions the `jobs` table rows. No broker is used
 (see docs/MVP_ARCHITECTURE.md section 1.5).
+
+Lease/recovery: every claim stamps `claimed_at` and mints an opaque
+`claim_token` returned to the worker. A `running` job whose lease has expired
+is recovered on the next poll (requeued for another attempt, or failed
+terminally once `max_job_attempts` is exhausted), so a worker crash can never
+leave a job permanently `running`. The claim token must be presented back on
+artifact upload/complete/fail, so a late request from a superseded worker is
+rejected and cannot corrupt a re-claimed job.
 """
 import base64
 import json
 import logging
+import secrets
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import select
@@ -19,6 +29,10 @@ from .models import Job, Narration, Voice
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # ---------- payload builders ----------
@@ -86,6 +100,9 @@ def claim_next(db: Session, worker_backend: str) -> Job | None:
     Only jobs tagged with the same ``required_backend`` as the requesting worker
     are claimable, so a mock worker can never take a job that needs the real
     qwen worker (and vice versa). Safe for a single backend process.
+
+    Claiming stamps the lease (`claimed_at`) and mints a fresh `claim_token`
+    that the worker must present on every artifact/complete/fail call.
     """
     job = db.execute(
         select(Job)
@@ -97,8 +114,59 @@ def claim_next(db: Session, worker_backend: str) -> Job | None:
         return None
     job.status = "running"
     job.attempts += 1
+    job.claimed_at = _utcnow()
+    job.claim_token = secrets.token_urlsafe(32)
     db.flush()
     return job
+
+
+# ---------- stale-job recovery ----------
+def recover_stale_jobs(db: Session) -> int:
+    """Requeue or terminally fail `running` jobs whose lease has expired.
+
+    Runs opportunistically from the worker poll (no background scheduler): the
+    worker is the only entity that can process a recovered job anyway. A job is
+    stale when it is still `running` past ``job_lease_seconds`` since its last
+    claim. NULL ``claimed_at`` (a pre-deployment row, or a row whose lease was
+    never stamped) is treated as stale so it is still recovered rather than
+    stuck forever. Returns the number of jobs recovered.
+
+    Recovery respects the existing attempt semantics: stale jobs with attempts
+    left are requeued (the next claim increments `attempts`), and stale jobs at
+    `max_job_attempts` become `failed` with the owning voice/narration released
+    from its in-progress state.
+    """
+    deadline = _utcnow() - timedelta(seconds=settings.job_lease_seconds)
+    stale = db.execute(
+        select(Job).where(
+            Job.status == "running",
+            (Job.claimed_at.is_(None)) | (Job.claimed_at < deadline),
+        )
+    ).scalars().all()
+    for job in stale:
+        _recover_stale_job(db, job)
+    db.flush()
+    return len(stale)
+
+
+def _recover_stale_job(db: Session, job: Job) -> None:
+    error = "Job lease expired while running; worker did not report completion."
+    _clear_lease(job)
+    if job.attempts < settings.max_job_attempts:
+        job.error = error
+        job.status = "queued"
+        if job.type == "narration":
+            shutil.rmtree(
+                storage.narration_chunk_dir(job.narration_id), ignore_errors=True
+            )
+    else:
+        job.status = "failed"
+        _mark_failed_owner_object(db, job, error)
+
+
+def _clear_lease(job: Job) -> None:
+    job.claimed_at = None
+    job.claim_token = None
 
 
 # ---------- artifacts ----------
@@ -130,6 +198,7 @@ def complete_job(
     sample_rate: int | None,
     durations: list[float],
 ) -> None:
+    _clear_lease(job)
     job.status = "succeeded"
     job.progress = 100
     job.result_json = json.dumps({"sample_rate": sample_rate, "durations": durations})
@@ -181,6 +250,7 @@ def complete_job(
 
 # ---------- failure ----------
 def fail_job(db: Session, job: Job, error: str) -> None:
+    _clear_lease(job)
     job.error = error[:4000]
     if job.attempts < settings.max_job_attempts:
         job.status = "queued"

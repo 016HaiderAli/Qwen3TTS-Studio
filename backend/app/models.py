@@ -148,6 +148,16 @@ class Job(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Lease metadata: when this job was claimed and by which claim. A running
+    # job whose claimed_at is older than the configured lease is considered
+    # stale and is recovered (requeued or failed). claim_token is the opaque
+    # ownership token handed to the worker at claim time and required back on
+    # artifact/complete/fail, so a late request from a superseded worker can
+    # never touch a job it no longer owns.
+    claimed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    claim_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )

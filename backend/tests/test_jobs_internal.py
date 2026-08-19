@@ -14,6 +14,11 @@ QWEN_AUTH = {
 }
 
 
+def _claim_headers(claim):
+    """Worker headers bound to a claim's ownership token."""
+    return {**WORKER_AUTH, "X-Job-Claim-Token": claim["claim_token"]}
+
+
 def _create_voice(client, name="V"):
     resp = client.post("/api/voices", json={"name": name, "language": "English"})
     assert resp.status_code == 201
@@ -51,6 +56,7 @@ def test_internal_poll_reachable_with_worker_token(client, dev_login):
     claim = resp.json()
     assert claim["job_id"]
     assert claim["type"] == "design"
+    assert claim["claim_token"]
 
 
 def test_internal_poll_unconfigured_returns_503_not_404(client, monkeypatch):
@@ -172,11 +178,12 @@ def test_design_job_lifecycle(client, dev_login, make_wav_bytes):
     assert claim["type"] == "design"
     assert claim["payload"]["voice_id"] == voice["id"]
     assert claim["payload"]["language"] == "English"
+    claim_headers = _claim_headers(claim)
 
     # invalid WAV upload rejected
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/artifact",
-        headers=WORKER_AUTH,
+        headers=claim_headers,
         data={"field": "reference_audio"},
         files={"file": ("bad.wav", b"garbage", "application/octet-stream")},
     )
@@ -184,7 +191,7 @@ def test_design_job_lifecycle(client, dev_login, make_wav_bytes):
 
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/artifact",
-        headers=WORKER_AUTH,
+        headers=claim_headers,
         data={"field": "reference_audio"},
         files={"file": ("ref.wav", make_wav_bytes(), "application/octet-stream")},
     )
@@ -192,7 +199,7 @@ def test_design_job_lifecycle(client, dev_login, make_wav_bytes):
 
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/complete",
-        headers=WORKER_AUTH,
+        headers=claim_headers,
         json={"sample_rate": 24000, "durations": [1.0]},
     )
     assert resp.status_code == 200
@@ -215,10 +222,11 @@ def test_design_artifact_written_to_preview_path(client, dev_login, make_wav_byt
 
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     assert claim["type"] == "design"
+    claim_headers = _claim_headers(claim)
     wav = make_wav_bytes()
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/artifact",
-        headers=WORKER_AUTH,
+        headers=claim_headers,
         data={"field": "reference_audio"},
         files={"file": ("ref.wav", wav, "application/octet-stream")},
     )
@@ -232,7 +240,7 @@ def test_design_artifact_written_to_preview_path(client, dev_login, make_wav_byt
 
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/complete",
-        headers=WORKER_AUTH,
+        headers=claim_headers,
         json={"sample_rate": 24000, "durations": [1.0]},
     )
     assert resp.status_code == 200
@@ -256,7 +264,7 @@ def test_fail_retries_then_marks_failed(client, dev_login):
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/fail",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim),
         json={"error": "GPU exploded"},
     )
     assert resp.status_code == 200
@@ -265,7 +273,7 @@ def test_fail_retries_then_marks_failed(client, dev_login):
     assert claim2 is not None
     resp = client.post(
         f"/internal/jobs/{claim2['job_id']}/fail",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim2),
         json={"error": "still broken"},
     )
     assert resp.status_code == 200
@@ -281,13 +289,13 @@ def test_complete_rejects_non_running_job(client, dev_login):
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     client.post(
         f"/internal/jobs/{claim['job_id']}/complete",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim),
         json={},
     )
     # completing again should 409
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/complete",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim),
         json={},
     )
     assert resp.status_code == 409
@@ -334,7 +342,7 @@ def test_narration_chunk_field_validation(client, dev_login):
 
     resp = client.post(
         f"/internal/jobs/{job_id}/artifact",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim),
         data={"field": "chunk_banana"},
         files={"file": ("c.wav", b"", "application/octet-stream")},
     )
@@ -349,11 +357,12 @@ def test_narration_complete_uses_wav_sample_rate_as_authoritative(
     job_id, narration_id = _enqueue_narration_job(dev_login)
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     assert claim["job_id"] == job_id
+    claim_headers = _claim_headers(claim)
 
     chunk_wav = make_wav_bytes(sr=16000, seconds=0.5)
     resp = client.post(
         f"/internal/jobs/{job_id}/artifact",
-        headers=WORKER_AUTH,
+        headers=claim_headers,
         data={"field": "chunk_0"},
         files={"file": ("c.wav", chunk_wav, "application/octet-stream")},
     )
@@ -362,7 +371,7 @@ def test_narration_complete_uses_wav_sample_rate_as_authoritative(
     # The worker claims 24000 Hz, but the actual artifact is 16000 Hz.
     resp = client.post(
         f"/internal/jobs/{job_id}/complete",
-        headers=WORKER_AUTH,
+        headers=claim_headers,
         json={"sample_rate": 24000, "durations": [0.5]},
     )
     assert resp.status_code == 200

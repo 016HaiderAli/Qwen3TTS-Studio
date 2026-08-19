@@ -46,6 +46,7 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
     job_id = claim["job_id"]
     job_type = claim["type"]
     payload = claim.get("payload") or {}
+    claim_token = claim.get("claim_token") or ""
     logger.info("Processing job %s (type=%s)", job_id, job_type)
 
     if job_type == "design":
@@ -54,8 +55,13 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
             instruct=payload.get("instruct") or "",
             text=payload.get("text") or "",
         )
-        client.upload_artifact(job_id, "reference_audio", out.wav_bytes)
-        client.complete(job_id, sample_rate=out.sample_rate, durations=[out.duration_sec])
+        client.upload_artifact(job_id, "reference_audio", out.wav_bytes, claim_token)
+        client.complete(
+            job_id,
+            claim_token,
+            sample_rate=out.sample_rate,
+            durations=[out.duration_sec],
+        )
         logger.info("Job %s design complete (%.2fs)", job_id, out.duration_sec)
 
     elif job_type == "clone_prompt":
@@ -64,8 +70,8 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
             ref_text=payload.get("ref_text") or "",
             language=payload.get("language") or "English",
         )
-        client.upload_artifact(job_id, "prompt_pt", pt_bytes)
-        client.complete(job_id)
+        client.upload_artifact(job_id, "prompt_pt", pt_bytes, claim_token)
+        client.complete(job_id, claim_token)
         logger.info("Job %s clone prompt complete (%d bytes)", job_id, len(pt_bytes))
 
     elif job_type == "narration":
@@ -85,8 +91,13 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
         sample_rate = outputs[0].sample_rate
         durations = [o.duration_sec for o in outputs]
         for i, out in enumerate(outputs):
-            client.upload_artifact(job_id, f"chunk_{i}", out.wav_bytes)
-        client.complete(job_id, sample_rate=sample_rate, durations=durations)
+            client.upload_artifact(job_id, f"chunk_{i}", out.wav_bytes, claim_token)
+        client.complete(
+            job_id,
+            claim_token,
+            sample_rate=sample_rate,
+            durations=durations,
+        )
         logger.info("Job %s narration complete (%d chunks)", job_id, len(outputs))
 
     else:
@@ -107,7 +118,11 @@ def run_once(config: WorkerConfig, client: WorkerAPIClient, backend: InferenceBa
     except Exception as exc:  # report failure and keep the loop alive
         logger.exception("job %s failed", claim.get("job_id"))
         try:
-            client.fail(claim.get("job_id"), str(exc))
+            client.fail(
+                claim.get("job_id"),
+                claim.get("claim_token") or "",
+                str(exc),
+            )
         except WorkerAPIError:
             logger.exception("could not report failure for job %s", claim.get("job_id"))
     return True

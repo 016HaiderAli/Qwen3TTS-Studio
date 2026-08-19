@@ -11,6 +11,10 @@ WORKER_AUTH = {
 }
 
 
+def _claim_headers(claim):
+    return {**WORKER_AUTH, "X-Job-Claim-Token": claim["claim_token"]}
+
+
 def _create_voice(client, name="My Voice", language="English") -> dict:
     resp = client.post(
         "/api/voices",
@@ -20,20 +24,20 @@ def _create_voice(client, name="My Voice", language="English") -> dict:
     return resp.json()
 
 
-def _upload_artifact(client, job_id, field, data):
+def _upload_artifact(client, claim, field, data):
     resp = client.post(
-        f"/internal/jobs/{job_id}/artifact",
-        headers=WORKER_AUTH,
+        f"/internal/jobs/{claim['job_id']}/artifact",
+        headers=_claim_headers(claim),
         data={"field": field},
         files={"file": ("artifact.bin", data, "application/octet-stream")},
     )
     assert resp.status_code == 200, resp.text
 
 
-def _complete_job(client, job_id):
+def _complete_job(client, claim):
     resp = client.post(
-        f"/internal/jobs/{job_id}/complete",
-        headers=WORKER_AUTH,
+        f"/internal/jobs/{claim['job_id']}/complete",
+        headers=_claim_headers(claim),
         json={"sample_rate": 24000, "durations": [1.0]},
     )
     assert resp.status_code == 200, resp.text
@@ -52,8 +56,8 @@ def _design_until_preview(client, voice_id, wav_bytes) -> dict:
     assert resp.status_code == 200, resp.text
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     assert claim["type"] == "design"
-    _upload_artifact(client, claim["job_id"], "reference_audio", wav_bytes)
-    _complete_job(client, claim["job_id"])
+    _upload_artifact(client, claim, "reference_audio", wav_bytes)
+    _complete_job(client, claim)
     return client.get(f"/api/voices/{voice_id}").json()
 
 
@@ -63,10 +67,10 @@ def _approve_until_approved(client, voice_id) -> dict:
     assert resp.status_code == 200, resp.text
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     assert claim["type"] == "clone_prompt"
-    _upload_artifact(client, claim["job_id"], "prompt_pt", b"mock-prompt")
+    _upload_artifact(client, claim, "prompt_pt", b"mock-prompt")
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/complete",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim),
         json={},
     )
     assert resp.status_code == 200, resp.text
@@ -252,7 +256,7 @@ def test_failed_redesign_of_approved_voice_restores_approved_state(
     # reference.
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     assert claim["type"] == "design"
-    _upload_artifact(client, claim["job_id"], "reference_audio", new_wav)
+    _upload_artifact(client, claim, "reference_audio", new_wav)
     preview_file = storage.root() / storage.voice_preview_rel(voice["id"])
     assert preview_file.is_file()
     assert preview_file.read_bytes() == new_wav
@@ -262,7 +266,7 @@ def test_failed_redesign_of_approved_voice_restores_approved_state(
     for _ in range(2):
         resp = client.post(
             f"/internal/jobs/{claim['job_id']}/fail",
-            headers=WORKER_AUTH,
+            headers=_claim_headers(claim),
             json={"error": "GPU exploded"},
         )
         assert resp.status_code == 200, resp.text
@@ -310,8 +314,8 @@ def test_redesign_promotes_new_preview_only_on_new_approval(
     assert resp.status_code == 200
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     assert claim["type"] == "design"
-    _upload_artifact(client, claim["job_id"], "reference_audio", new_wav)
-    _complete_job(client, claim["job_id"])
+    _upload_artifact(client, claim, "reference_audio", new_wav)
+    _complete_job(client, claim)
 
     voice = client.get(f"/api/voices/{voice['id']}").json()
     assert voice["status"] == "preview_ready"
@@ -330,10 +334,10 @@ def test_redesign_promotes_new_preview_only_on_new_approval(
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
     assert claim["type"] == "clone_prompt"
     assert base64.b64decode(claim["payload"]["ref_audio_b64"]) == new_wav
-    _upload_artifact(client, claim["job_id"], "prompt_pt", b"prompt-v2")
+    _upload_artifact(client, claim, "prompt_pt", b"prompt-v2")
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/complete",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim),
         json={},
     )
     assert resp.status_code == 200

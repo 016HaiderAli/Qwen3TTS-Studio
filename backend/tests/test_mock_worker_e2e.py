@@ -14,6 +14,10 @@ WORKER_AUTH = {
 }
 
 
+def _claim_headers(claim):
+    return {**WORKER_AUTH, "X-Job-Claim-Token": claim["claim_token"]}
+
+
 def _run_worker(client, mock: MockBackend, max_jobs: int = 10) -> int:
     """Poll and process jobs until idle. Returns number of jobs processed."""
     processed = 0
@@ -34,16 +38,16 @@ def _run_worker(client, mock: MockBackend, max_jobs: int = 10) -> int:
                 instruct=payload["instruct"],
                 text=payload["text"],
             )
-            _upload(client, job_id, "reference_audio", out.wav_bytes)
-            _complete(client, job_id, out.sample_rate, [out.duration_sec])
+            _upload(client, claim, "reference_audio", out.wav_bytes)
+            _complete(client, claim, out.sample_rate, [out.duration_sec])
         elif job_type == "clone_prompt":
             pt = mock.create_clone_prompt(
                 ref_audio_b64=payload["ref_audio_b64"],
                 ref_text=payload["ref_text"],
                 language=payload["language"],
             )
-            _upload(client, job_id, "prompt_pt", pt)
-            _complete(client, job_id)
+            _upload(client, claim, "prompt_pt", pt)
+            _complete(client, claim)
         elif job_type == "narration":
             outputs = mock.narrate(
                 chunks=payload["chunks"],
@@ -52,33 +56,37 @@ def _run_worker(client, mock: MockBackend, max_jobs: int = 10) -> int:
                 instruct=payload["instruct"],
             )
             for i, out in enumerate(outputs):
-                _upload(client, job_id, f"chunk_{i}", out.wav_bytes)
+                _upload(client, claim, f"chunk_{i}", out.wav_bytes)
             _complete(
                 client,
-                job_id,
+                claim,
                 outputs[0].sample_rate,
                 [o.duration_sec for o in outputs],
             )
     return processed
 
 
-def _upload(client, job_id, field, data):
+def _upload(client, claim, field, data):
     resp = client.post(
-        f"/internal/jobs/{job_id}/artifact",
-        headers=WORKER_AUTH,
+        f"/internal/jobs/{claim['job_id']}/artifact",
+        headers=_claim_headers(claim),
         data={"field": field},
         files={"file": ("a.wav", data, "application/octet-stream")},
     )
     assert resp.status_code == 200, resp.text
 
 
-def _complete(client, job_id, sr=None, durations=None):
+def _complete(client, claim, sr=None, durations=None):
     body = {}
     if sr is not None:
         body["sample_rate"] = sr
     if durations:
         body["durations"] = durations
-    resp = client.post(f"/internal/jobs/{job_id}/complete", headers=WORKER_AUTH, json=body)
+    resp = client.post(
+        f"/internal/jobs/{claim['job_id']}/complete",
+        headers=_claim_headers(claim),
+        json=body,
+    )
     assert resp.status_code == 200, resp.text
 
 
@@ -191,7 +199,7 @@ def test_job_progress_during_narration(client):
         language=claim["payload"]["language"],
         instruct=claim["payload"]["instruct"],
     )
-    _upload(client, job_id, "chunk_0", outputs[0].wav_bytes)
+    _upload(client, claim, "chunk_0", outputs[0].wav_bytes)
 
     status = client.get(f"/api/jobs/{job_id}").json()
     assert status["job"]["status"] == "running"
@@ -199,8 +207,13 @@ def test_job_progress_during_narration(client):
     assert status["chunk_total"] == 2
     assert status["chunk_done"] == 1
 
-    _upload(client, job_id, "chunk_1", outputs[1].wav_bytes)
-    _complete(client, job_id, outputs[0].sample_rate, [o.duration_sec for o in outputs])
+    _upload(client, claim, "chunk_1", outputs[1].wav_bytes)
+    _complete(
+        client,
+        claim,
+        outputs[0].sample_rate,
+        [o.duration_sec for o in outputs],
+    )
     status = client.get(f"/api/jobs/{job_id}").json()
     assert status["job"]["status"] == "succeeded"
     assert status["job"]["progress"] == 100
@@ -258,7 +271,7 @@ def test_approval_failure_returns_to_preview_ready(client):
     assert claim["type"] == "clone_prompt"
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/fail",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim),
         json={"error": "GPU exploded"},
     )
     assert resp.status_code == 200
@@ -266,7 +279,7 @@ def test_approval_failure_returns_to_preview_ready(client):
     assert claim2 is not None
     resp = client.post(
         f"/internal/jobs/{claim2['job_id']}/fail",
-        headers=WORKER_AUTH,
+        headers=_claim_headers(claim2),
         json={"error": "still broken"},
     )
     assert resp.status_code == 200

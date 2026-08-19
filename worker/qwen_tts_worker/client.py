@@ -1,7 +1,8 @@
 """HTTP client for the backend internal job API.
 
 The worker authenticates with a bearer token only; it never receives or uses
-database/storage/OAuth credentials.
+database/storage/OAuth credentials. Job ownership is bound with the claim token
+minted at claim time and required back on artifact/complete/fail calls.
 """
 import logging
 from typing import Any
@@ -56,9 +57,10 @@ class WorkerAPIClient:
             raise WorkerAPIError("worker authentication rejected")
         raise WorkerAPIError(f"poll failed: HTTP {resp.status_code}: {resp.text[:200]}")
 
-    def upload_artifact(self, job_id: str, field: str, data: bytes) -> None:
+    def upload_artifact(self, job_id: str, field: str, data: bytes, claim_token: str) -> None:
         resp = self._client.post(
             f"/internal/jobs/{job_id}/artifact",
+            headers={"X-Job-Claim-Token": claim_token},
             data={"field": field},
             files={"file": ("artifact.wav", data, "application/octet-stream")},
         )
@@ -70,6 +72,7 @@ class WorkerAPIClient:
     def complete(
         self,
         job_id: str,
+        claim_token: str,
         sample_rate: int | None = None,
         durations: list[float] | None = None,
     ) -> None:
@@ -78,15 +81,21 @@ class WorkerAPIClient:
             body["sample_rate"] = int(sample_rate)
         if durations is not None:
             body["durations"] = durations
-        resp = self._client.post(f"/internal/jobs/{job_id}/complete", json=body)
+        resp = self._client.post(
+            f"/internal/jobs/{job_id}/complete",
+            headers={"X-Job-Claim-Token": claim_token},
+            json=body,
+        )
         if resp.status_code != 200:
             raise WorkerAPIError(
                 f"complete failed: HTTP {resp.status_code}: {resp.text[:200]}"
             )
 
-    def fail(self, job_id: str, error: str) -> None:
+    def fail(self, job_id: str, claim_token: str, error: str) -> None:
         resp = self._client.post(
-            f"/internal/jobs/{job_id}/fail", json={"error": error[:4000]}
+            f"/internal/jobs/{job_id}/fail",
+            headers={"X-Job-Claim-Token": claim_token},
+            json={"error": error[:4000]},
         )
         if resp.status_code != 200:
             raise WorkerAPIError(

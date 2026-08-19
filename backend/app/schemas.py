@@ -111,6 +111,9 @@ class JobClaim(BaseModel):
     job_id: str
     type: str
     payload: dict[str, Any]
+    # Opaque ownership token minted at claim time. The worker must present it
+    # (X-Job-Claim-Token) on every artifact/complete/fail call for this job.
+    claim_token: str
 
 
 class ArtifactUploadResponse(BaseModel):

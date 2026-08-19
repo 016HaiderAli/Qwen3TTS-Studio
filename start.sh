@@ -16,6 +16,12 @@ WORKER_BACKEND="${WORKER_BACKEND:-mock}"
 export WORKER_TOKEN="${WORKER_TOKEN:-dev-worker-token}"
 export DEV_LOGIN="${DEV_LOGIN:-1}"
 export FRONTEND_URL="${FRONTEND_URL:-http://localhost:5173}"
+# Tag web-tier jobs with the worker backend that is actually running so the
+# worker can claim them (the capability gate is strict: a mock worker can never
+# claim a "qwen"-tagged job). Defaults to the WORKER_BACKEND, so the documented
+# mock preview works out of the box and a real qwen preview works too. Override
+# explicitly if the backend and worker intentionally differ.
+export DEFAULT_JOB_BACKEND="${DEFAULT_JOB_BACKEND:-$WORKER_BACKEND}"
 
 echo ">> Starting backend on :8000"
 (
