@@ -8,7 +8,7 @@ from .. import storage
 from ..config import get_settings
 from ..db import get_db
 from ..deps import get_current_user
-from ..models import User, Voice
+from ..models import Job, Narration, User, Voice
 from ..schemas import (
     VoiceCreate,
     VoiceDesignRequest,
@@ -177,8 +177,43 @@ def delete_voice(
     db: Session = Depends(get_db),
 ):
     voice = _get_owned_voice(db, voice_id, user)
+    if voice.status in ("designing", "approving"):
+        raise HTTPException(
+            status_code=409,
+            detail="A design or approval is still in progress for this voice. Wait for it to finish before deleting.",
+        )
+    narration_ids = [
+        row[0]
+        for row in db.execute(
+            select(Narration.id).where(
+                Narration.voice_id == voice.id, Narration.owner_id == user.id
+            )
+        ).all()
+    ]
+    active = db.execute(
+        select(Job.id).where(
+            Job.owner_id == user.id,
+            Job.status.in_(["queued", "running"]),
+            (Job.voice_id == voice.id)
+            | (
+                Job.narration_id.in_(
+                    select(Narration.id).where(
+                        Narration.voice_id == voice.id,
+                        Narration.owner_id == user.id,
+                    )
+                )
+            ),
+        )
+    ).first()
+    if active is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="A design or narration job is still in progress for this voice. Wait for it to finish before deleting.",
+        )
     db.delete(voice)
     db.commit()
     storage.remove_voice_artifacts(voice_id)
+    for narration_id in narration_ids:
+        storage.remove_narration_artifacts(narration_id)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

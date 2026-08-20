@@ -1,12 +1,24 @@
 """Database engine, session factory, and ORM base."""
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import get_settings
 
 settings = get_settings()
+
+
+def _enable_sqlite_foreign_keys(dbapi_connection, connection_record) -> None:
+    """SQLite does not enforce foreign keys unless each connection opts in.
+
+    The schema declares ``ondelete="CASCADE"`` constraints (voices -> narrations,
+    voices/narrations -> jobs); without this pragma those constraints are inert and
+    deleting a parent would leave dangling child rows.
+    """
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -22,6 +34,9 @@ engine = create_engine(
     connect_args=connect_args,
     future=True,
 )
+
+if settings.database_url.startswith("sqlite"):
+    event.listen(engine, "connect", _enable_sqlite_foreign_keys)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 

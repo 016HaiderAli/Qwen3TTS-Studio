@@ -11,7 +11,7 @@ from .. import storage
 from ..config import get_settings
 from ..db import get_db
 from ..deps import get_current_user
-from ..models import Narration, User, Voice
+from ..models import Job, Narration, User, Voice
 from ..schemas import NarrationCreate, NarrationListResponse, NarrationResponse
 
 router = APIRouter(prefix="/api/narrations", tags=["narrations"])
@@ -160,6 +160,18 @@ def delete_narration(
     db: Session = Depends(get_db),
 ):
     narration = _get_owned_narration(db, narration_id, user)
+    active = db.execute(
+        select(Job.id).where(
+            Job.narration_id == narration.id,
+            Job.owner_id == user.id,
+            Job.status.in_(["queued", "running"]),
+        )
+    ).first()
+    if active is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This narration is still being generated. Wait for it to finish before deleting.",
+        )
     db.delete(narration)
     db.commit()
     storage.remove_narration_artifacts(narration_id)

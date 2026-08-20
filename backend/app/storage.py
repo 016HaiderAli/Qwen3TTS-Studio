@@ -4,10 +4,14 @@ Implements the local-storage layout from docs/MVP_ARCHITECTURE.md section 6.4.
 Paths stored in the database are always relative to the storage root and are
 validated on resolution to prevent path traversal.
 """
+import logging
 import os
+import shutil
 from pathlib import Path
 
 from .config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class StorageError(Exception):
@@ -116,16 +120,36 @@ def narration_chunk_paths(narration_id: str, count: int) -> list[Path]:
 
 
 def remove_voice_artifacts(voice_id: str) -> None:
+    """Remove the voice's filesystem artifacts.
+
+    Called only after the owning DB row has been committed; a failure here is
+    logged but never propagated, so an already-committed deletion is never
+    rolled back.
+    """
     target = _root() / f"voices/{voice_id}"
     if target.exists():
-        import shutil
-
-        shutil.rmtree(target, ignore_errors=True)
+        try:
+            shutil.rmtree(target)
+        except OSError as exc:
+            logger.warning(
+                "failed to remove voice artifacts for %s: %s", voice_id, exc
+            )
 
 
 def remove_narration_artifacts(narration_id: str) -> None:
+    """Remove a narration's filesystem artifacts (chunks + final audio).
+
+    Called only after the owning DB row has been committed; a failure here is
+    logged but never propagated, so an already-committed deletion is never
+    rolled back.
+    """
     target = _root() / f"narrations/{narration_id}"
     if target.exists():
-        import shutil
-
-        shutil.rmtree(target, ignore_errors=True)
+        try:
+            shutil.rmtree(target)
+        except OSError as exc:
+            logger.warning(
+                "failed to remove narration artifacts for %s: %s",
+                narration_id,
+                exc,
+            )

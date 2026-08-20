@@ -88,6 +88,9 @@ class Voice(Base):
     narrations: Mapped[list["Narration"]] = relationship(
         back_populates="voice", cascade="all, delete-orphan"
     )
+    jobs: Mapped[list["Job"]] = relationship(
+        back_populates="voice", cascade="all, delete-orphan"
+    )
 
 
 class Narration(Base):
@@ -121,6 +124,9 @@ class Narration(Base):
 
     owner: Mapped["User"] = relationship(back_populates="narrations")
     voice: Mapped["Voice"] = relationship(back_populates="narrations")
+    jobs: Mapped[list["Job"]] = relationship(
+        back_populates="narration", cascade="all, delete-orphan"
+    )
 
 
 class Job(Base):
@@ -164,3 +170,6 @@ class Job(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+
+    voice: Mapped["Voice | None"] = relationship(back_populates="jobs")
+    narration: Mapped["Narration | None"] = relationship(back_populates="jobs")

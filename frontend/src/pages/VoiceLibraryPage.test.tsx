@@ -736,3 +736,107 @@ describe('VoiceLibraryPage — modal accessibility', () => {
     expect(trigger).toHaveFocus()
   })
 })
+
+describe('VoiceLibraryPage — deletion', () => {
+  const approvedVoice = {
+    ...draftVoice,
+    status: 'approved',
+    has_approved_prompt: true,
+  }
+
+  const approveCardHandler: RouteHandler = (url, init) => {
+    const method = init?.method ?? 'GET'
+    if (url.endsWith('/api/voices') && method === 'GET') {
+      return jsonResponse(200, [approvedVoice])
+    }
+    return jsonResponse(404, {})
+  }
+
+  it('warns that deleting a voice also deletes its narrations', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let deleted = false
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.startsWith('/api/voices/') && method === 'DELETE') {
+        deleted = true
+        return jsonResponse(204)
+      }
+      return approveCardHandler(url, init)
+    })
+    renderPage()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Delete voice "Narrator"? This also deletes all narrations made with this voice and cannot be undone.',
+    )
+    await waitFor(() => expect(deleted).toBe(true))
+    await waitFor(() =>
+      expect(screen.queryByText('Narrator')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('does not call the API when the confirmation is dismissed', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    let deleted = false
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.startsWith('/api/voices/') && method === 'DELETE') {
+        deleted = true
+        return jsonResponse(204)
+      }
+      return approveCardHandler(url, init)
+    })
+    renderPage()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+    await flushPromises()
+    expect(deleted).toBe(false)
+    expect(screen.getByText('Narrator')).toBeInTheDocument()
+  })
+
+  it('disables delete while a voice is designing', async () => {
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/voices') && method === 'GET') {
+        return jsonResponse(200, [{ ...draftVoice, status: 'designing' }])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    const deleteBtn = await screen.findByRole('button', { name: 'Delete' })
+    expect(deleteBtn).toBeDisabled()
+  })
+
+  it('disables delete while a voice is approving', async () => {
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/voices') && method === 'GET') {
+        return jsonResponse(200, [{ ...draftVoice, status: 'approving' }])
+      }
+      return jsonResponse(404, {})
+    })
+    renderPage()
+    const deleteBtn = await screen.findByRole('button', { name: 'Delete' })
+    expect(deleteBtn).toBeDisabled()
+  })
+
+  it('surfaces a 409 as the backend error message', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET'
+      if (url.startsWith('/api/voices/') && method === 'DELETE') {
+        return jsonResponse(409, {
+          detail: 'A narration or design job is still in progress.',
+        })
+      }
+      return approveCardHandler(url, init)
+    })
+    renderPage()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+    expect(
+      await screen.findByText('A narration or design job is still in progress.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Narrator')).toBeInTheDocument()
+  })
+})

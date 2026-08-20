@@ -185,7 +185,12 @@ export function VoiceLibraryPage() {
   }
 
   const remove = async (voice: Voice) => {
-    if (!window.confirm(`Delete voice "${voice.name}"? This cannot be undone.`)) return
+    if (
+      !window.confirm(
+        `Delete voice "${voice.name}"? This also deletes all narrations made with this voice and cannot be undone.`,
+      )
+    )
+      return
     setError('')
     try {
       await api.deleteVoice(voice.id)
@@ -623,7 +628,16 @@ function VoiceCard({
             Use for narration
           </button>
         )}
-        <button className="btn btn-ghost" onClick={onDelete}>
+        <button
+          className="btn btn-ghost"
+          onClick={onDelete}
+          disabled={busyStatus}
+          title={
+            busyStatus
+              ? 'Wait for the current design or approval to finish before deleting.'
+              : undefined
+          }
+        >
           Delete
         </button>
       </div>
