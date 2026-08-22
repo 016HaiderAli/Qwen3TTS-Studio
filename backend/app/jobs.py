@@ -261,6 +261,10 @@ def complete_job(
         narration.duration_sec = duration
         narration.status = "ready"
         narration.chunk_durations_json = json.dumps(durations)
+        # The concatenated final.wav is the authoritative artifact from here on;
+        # the per-chunk files are transient intermediates, so drop them once the
+        # narration is complete (best-effort, never fatal).
+        clear_partial_chunks(narration.id)
     db.flush()
 
 
@@ -284,9 +288,16 @@ def _mark_failed_owner_object(db: Session, job: Job, error: str) -> None:
         if narration is not None:
             narration.status = "failed"
             narration.error = error[:4000]
+        # No further attempts will run: the intermediate chunk files are no
+        # longer needed, so drop them (best-effort, never fatal).
+        clear_partial_chunks(job.narration_id)
     elif job.type == "design" and job.voice_id:
         voice = db.get(Voice, job.voice_id)
         if voice is not None and voice.status == "designing":
+            # The draft preview from the failed attempt is stale: drop it before
+            # restoring the owning voice's previous state (best-effort, never
+            # fatal).
+            storage.remove_voice_preview(voice.id)
             if voice.reference_audio_path and voice.prompt_pt_path:
                 # A failed redesign of an approved voice restores the approved
                 # state so its saved reference/prompt keep working.

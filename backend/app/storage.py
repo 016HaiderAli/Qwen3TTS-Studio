@@ -153,3 +153,21 @@ def remove_narration_artifacts(narration_id: str) -> None:
                 narration_id,
                 exc,
             )
+
+
+def remove_voice_preview(voice_id: str) -> None:
+    """Remove the voice's draft preview file.
+
+    Called when a design job fails terminally: the draft preview from the
+    failed attempt is stale (an approved voice is served from its reference,
+    and a draft voice has no preview to approve), so it is removed best-effort.
+    A failure here is logged but never propagated.
+    """
+    target = _root() / voice_preview_rel(voice_id)
+    if target.exists():
+        try:
+            target.unlink()
+        except OSError as exc:
+            logger.warning(
+                "failed to remove voice preview for %s: %s", voice_id, exc
+            )

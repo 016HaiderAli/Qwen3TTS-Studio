@@ -135,7 +135,7 @@ def _full_flow(client, script, delivery_direction="", expect_chunks=1):
     assert _run_worker(client, MockBackend()) >= 1
     narration = client.get(f"/api/narrations/{narration['id']}").json()
     assert narration["status"] == "ready"
-    assert narration["chunks_done"] == narration["chunk_count"]
+    assert narration["chunks_done"] == 0
     assert narration["sample_rate"] == 24000
     assert narration["duration_sec"] is not None
 

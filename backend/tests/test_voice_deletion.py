@@ -128,7 +128,7 @@ def test_voice_delete_cascades_narrations_jobs_and_artifacts(
     narration_dir = storage.root() / f"narrations/{narration['id']}"
     assert (voice_dir / "reference.wav").is_file()
     assert (voice_dir / "voice_clone_prompt.pt").is_file()
-    assert (narration_dir / "chunks").is_dir()
+    assert not (narration_dir / "chunks").exists()
     assert (narration_dir / "final.wav").is_file()
 
     resp = client.delete(f"/api/voices/{voice['id']}")
