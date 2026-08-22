@@ -198,25 +198,21 @@ def complete_job(
     sample_rate: int | None,
     durations: list[float],
 ) -> None:
-    _clear_lease(job)
-    job.status = "succeeded"
-    job.progress = 100
-    job.result_json = json.dumps({"sample_rate": sample_rate, "durations": durations})
-    db.flush()
-
+    # Validate the owning parent (and, for narration, every expected chunk)
+    # BEFORE the job can be marked succeeded, so a completion whose parent was
+    # removed (or whose artifacts are incomplete) fails cleanly instead of
+    # leaving a `succeeded` job with a dangling reference. The deletion guards
+    # reject removing a voice/narration with a queued or running job, so a
+    # missing parent here can only come from a bypass of those guards or manual
+    # DB edits; this ordering keeps such states from corrupting job history.
     if job.type == "design":
         voice = db.get(Voice, job.voice_id)
-        if voice is not None and voice.status == "designing":
-            voice.status = "preview_ready"
-            # The approved reference/prompt are intentionally untouched: a
-            # redesign preview lives at the draft preview path and is only
-            # promoted to the live reference when the replacement is approved
-            # (see approve_voice).
+        if voice is None:
+            raise RuntimeError("voice record missing")
     elif job.type == "clone_prompt":
         voice = db.get(Voice, job.voice_id)
-        if voice is not None and voice.status == "approving":
-            voice.status = "approved"
-            voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
+        if voice is None:
+            raise RuntimeError("voice record missing")
     elif job.type == "narration":
         narration = db.get(Narration, job.narration_id)
         if narration is None:
@@ -226,9 +222,29 @@ def complete_job(
         existing = [p for p in paths if p.is_file()]
         if len(existing) != count:
             raise RuntimeError(f"expected {count} chunk files, found {len(existing)}")
+        # Concatenate to the final audio now: a chunk-read/format failure must
+        # surface before the job can be marked succeeded.
         sr, duration = audio.concat_wav_files(
             existing, storage.root() / storage.narration_final_rel(narration.id)
         )
+
+    _clear_lease(job)
+    job.status = "succeeded"
+    job.progress = 100
+    job.result_json = json.dumps({"sample_rate": sample_rate, "durations": durations})
+
+    if job.type == "design":
+        if voice.status == "designing":
+            voice.status = "preview_ready"
+            # The approved reference/prompt are intentionally untouched: a
+            # redesign preview lives at the draft preview path and is only
+            # promoted to the live reference when the replacement is approved
+            # (see approve_voice).
+    elif job.type == "clone_prompt":
+        if voice.status == "approving":
+            voice.status = "approved"
+            voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
+    elif job.type == "narration":
         # The sample rate parsed from the actual WAV chunks is authoritative for
         # the final narration; the worker-reported value is recorded for
         # cross-checking but never trusted over the artifact metadata.
