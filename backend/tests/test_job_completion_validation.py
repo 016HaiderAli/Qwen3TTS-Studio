@@ -120,6 +120,14 @@ def _count_succeeded_dangling(column: str, parent_table: str) -> int:
         return conn.execute(text(sql)).scalar()
 
 
+def _voice_prompt_path(voice_id: str) -> str | None:
+    with engine.connect() as conn:
+        return conn.execute(
+            text("SELECT prompt_pt_path FROM voices WHERE id = :id"),
+            {"id": voice_id},
+        ).scalar()
+
+
 def test_complete_with_missing_voice_does_not_succeed(client, dev_login):
     dev_login("alice@example.com")
     voice = _create_voice(client)
@@ -164,3 +172,80 @@ def test_complete_with_missing_narration_does_not_succeed(
     assert resp.status_code == 422
     assert _job_status(claim["job_id"]) != "succeeded"
     assert _count_succeeded_dangling("narration_id", "narrations") == 0
+
+
+def test_complete_design_without_artifact_does_not_succeed(client, dev_login):
+    """A design completion without the required preview artifact is rejected."""
+    dev_login("alice@example.com")
+    voice = _create_voice(client)
+    claim = _design_to_running(client, voice["id"])
+
+    resp = client.post(
+        f"/internal/jobs/{claim['job_id']}/complete",
+        headers=_claim_headers(claim),
+        json={"sample_rate": 24000, "durations": [1.0]},
+    )
+    assert resp.status_code == 422
+    assert _job_status(claim["job_id"]) != "succeeded"
+    assert client.get(f"/api/voices/{voice['id']}").json()["status"] != "preview_ready"
+
+
+def test_complete_clone_prompt_without_artifact_does_not_succeed(
+    client, dev_login, make_wav_bytes
+):
+    """A clone-prompt completion without the required .pt artifact is rejected."""
+    dev_login("alice@example.com")
+    wav = make_wav_bytes()
+    voice = _create_voice(client)
+    claim = _design_to_running(client, voice["id"])
+    _upload(client, claim, "reference_audio", wav)
+    resp = client.post(
+        f"/internal/jobs/{claim['job_id']}/complete",
+        headers=_claim_headers(claim),
+        json={"sample_rate": 24000, "durations": [1.0]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = client.post(f"/api/voices/{voice['id']}/approve")
+    assert resp.status_code == 200, resp.text
+    claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    assert claim["type"] == "clone_prompt"
+
+    resp = client.post(
+        f"/internal/jobs/{claim['job_id']}/complete",
+        headers=_claim_headers(claim),
+        json={},
+    )
+    assert resp.status_code == 422
+    assert _job_status(claim["job_id"]) != "succeeded"
+    assert client.get(f"/api/voices/{voice['id']}").json()["status"] != "approved"
+    assert _voice_prompt_path(voice["id"]) is None
+
+
+def test_complete_narration_with_missing_chunk_does_not_succeed(
+    client, dev_login, make_wav_bytes
+):
+    """A narration completion with an expected chunk file missing is rejected."""
+    dev_login("alice@example.com")
+    wav = make_wav_bytes()
+    voice = _approved_voice(client, wav)
+
+    script = " ".join(f"Sentence {i}." for i in range(50))
+    resp = client.post(
+        "/api/narrations", json={"voice_id": voice["id"], "script": script}
+    )
+    assert resp.status_code == 201, resp.text
+    claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    assert claim["type"] == "narration"
+    count = len(claim["payload"]["chunks"])
+    assert count >= 2
+    for i in range(count - 1):
+        _upload(client, claim, f"chunk_{i}", wav)
+
+    resp = client.post(
+        f"/internal/jobs/{claim['job_id']}/complete",
+        headers=_claim_headers(claim),
+        json={"sample_rate": 24000, "durations": [1.0] * count},
+    )
+    assert resp.status_code == 422
+    assert _job_status(claim["job_id"]) != "succeeded"

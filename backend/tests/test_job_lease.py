@@ -278,7 +278,7 @@ def test_late_complete_cannot_overwrite_recovered_job(
 
 
 # ---------- 9. a late fail cannot corrupt the recovered job ----------
-def test_late_fail_cannot_corrupt_recovered_job(client, dev_login):
+def test_late_fail_cannot_corrupt_recovered_job(client, dev_login, make_wav_bytes):
     dev_login("alice@example.com")
     voice = _create_voice(client)
     _design(client, voice["id"])
@@ -304,6 +304,13 @@ def test_late_fail_cannot_corrupt_recovered_job(client, dev_login):
     assert job.claim_token == worker_b["claim_token"]
 
     # Worker B completes successfully.
+    upload = client.post(
+        f"/internal/jobs/{job_id}/artifact",
+        headers=_claim_headers(worker_b),
+        data={"field": "reference_audio"},
+        files={"file": ("ref.wav", make_wav_bytes(), "application/octet-stream")},
+    )
+    assert upload.status_code == 200, upload.text
     done = client.post(
         f"/internal/jobs/{job_id}/complete",
         headers=_claim_headers(worker_b),

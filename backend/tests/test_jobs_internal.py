@@ -282,16 +282,24 @@ def test_fail_retries_then_marks_failed(client, dev_login):
     assert voice_resp["status"] == "draft"
 
 
-def test_complete_rejects_non_running_job(client, dev_login):
+def test_complete_rejects_non_running_job(client, dev_login, make_wav_bytes):
     dev_login("alice@example.com")
     voice = _create_voice(client)
     _design(client, voice["id"])
     claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
-    client.post(
+    upload = client.post(
+        f"/internal/jobs/{claim['job_id']}/artifact",
+        headers=_claim_headers(claim),
+        data={"field": "reference_audio"},
+        files={"file": ("ref.wav", make_wav_bytes(), "application/octet-stream")},
+    )
+    assert upload.status_code == 200, upload.text
+    first = client.post(
         f"/internal/jobs/{claim['job_id']}/complete",
         headers=_claim_headers(claim),
-        json={},
+        json={"sample_rate": 24000, "durations": [1.0]},
     )
+    assert first.status_code == 200, first.text
     # completing again should 409
     resp = client.post(
         f"/internal/jobs/{claim['job_id']}/complete",

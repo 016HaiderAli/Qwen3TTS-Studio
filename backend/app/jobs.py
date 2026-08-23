@@ -198,21 +198,26 @@ def complete_job(
     sample_rate: int | None,
     durations: list[float],
 ) -> None:
-    # Validate the owning parent (and, for narration, every expected chunk)
-    # BEFORE the job can be marked succeeded, so a completion whose parent was
-    # removed (or whose artifacts are incomplete) fails cleanly instead of
-    # leaving a `succeeded` job with a dangling reference. The deletion guards
-    # reject removing a voice/narration with a queued or running job, so a
-    # missing parent here can only come from a bypass of those guards or manual
-    # DB edits; this ordering keeps such states from corrupting job history.
+    # Validate the owning parent and the job's required artifact (design preview,
+    # clone prompt .pt, or narration chunks) BEFORE the job can be marked
+    # succeeded, so a completion whose parent was removed (or whose artifacts are
+    # incomplete) fails cleanly instead of leaving a `succeeded` job with a
+    # dangling reference. The deletion guards reject removing a voice/narration
+    # with a queued or running job, so a missing parent here can only come from a
+    # bypass of those guards or manual DB edits; this ordering keeps such states
+    # from corrupting job history.
     if job.type == "design":
         voice = db.get(Voice, job.voice_id)
         if voice is None:
             raise RuntimeError("voice record missing")
+        if storage.safe_resolve(storage.voice_preview_rel(voice.id)) is None:
+            raise RuntimeError("design preview artifact missing")
     elif job.type == "clone_prompt":
         voice = db.get(Voice, job.voice_id)
         if voice is None:
             raise RuntimeError("voice record missing")
+        if storage.safe_resolve(storage.voice_prompt_rel(voice.id)) is None:
+            raise RuntimeError("clone prompt artifact missing")
     elif job.type == "narration":
         narration = db.get(Narration, job.narration_id)
         if narration is None:
