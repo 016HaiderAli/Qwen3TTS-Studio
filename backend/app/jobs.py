@@ -176,7 +176,12 @@ def store_artifact(db: Session, job: Job, field: str, data: bytes) -> None:
         storage.write_bytes(storage.voice_preview_rel(job.voice_id), data)
         job.progress = 50
     elif job.type == "clone_prompt" and field == "prompt_pt":
-        storage.write_bytes(storage.voice_prompt_rel(job.voice_id), data)
+        # Write to a staged path: the live prompt slot (the path referenced by
+        # prompt_pt_path / served to narrations) must only ever hold a prompt
+        # that has passed full clone completion, so an in-flight attempt never
+        # overwrites a previously approved prompt. Promotion happens in
+        # complete_job after success.
+        storage.write_bytes(storage.voice_prompt_staged_rel(job.voice_id), data)
         job.progress = 50
     elif job.type == "narration" and field.startswith("chunk_"):
         try:
@@ -216,7 +221,7 @@ def complete_job(
         voice = db.get(Voice, job.voice_id)
         if voice is None:
             raise RuntimeError("voice record missing")
-        if storage.safe_resolve(storage.voice_prompt_rel(voice.id)) is None:
+        if storage.safe_resolve(storage.voice_prompt_staged_rel(voice.id)) is None:
             raise RuntimeError("clone prompt artifact missing")
     elif job.type == "narration":
         narration = db.get(Narration, job.narration_id)
@@ -247,6 +252,11 @@ def complete_job(
             # (see approve_voice).
     elif job.type == "clone_prompt":
         if voice.status == "approving":
+            # Only now that the clone has fully succeeded is the staged .pt
+            # promoted into the live prompt slot (the path referenced by
+            # prompt_pt_path). A failed/retried attempt leaves the previously
+            # approved prompt untouched.
+            storage.promote_voice_prompt(voice.id)
             voice.status = "approved"
             voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
     elif job.type == "narration":
@@ -281,6 +291,11 @@ def fail_job(db: Session, job: Job, error: str) -> None:
         job.status = "queued"
         if job.type == "narration":
             shutil.rmtree(storage.narration_chunk_dir(job.narration_id), ignore_errors=True)
+        elif job.type == "clone_prompt" and job.voice_id:
+            # The staged .pt from this attempt is partial/unverified: drop it so
+            # a retry must upload fresh (and complete_job only ever promotes the
+            # current attempt's file).
+            storage.remove_staged_voice_prompt(job.voice_id)
     else:
         job.status = "failed"
         _mark_failed_owner_object(db, job, error)
@@ -310,6 +325,10 @@ def _mark_failed_owner_object(db: Session, job: Job, error: str) -> None:
             else:
                 voice.status = "draft"
     elif job.type == "clone_prompt" and job.voice_id:
+        # No further attempts will run: drop the staged .pt (best-effort, never
+        # fatal) so a failed first-time clone leaves no prompt at all and a
+        # failed redesign leaves only the previously approved live prompt.
+        storage.remove_staged_voice_prompt(job.voice_id)
         voice = db.get(Voice, job.voice_id)
         if voice is not None and voice.status == "approving":
             voice.status = "preview_ready"

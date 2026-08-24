@@ -101,6 +101,47 @@ def voice_prompt_rel(voice_id: str) -> str:
     return f"voices/{voice_id}/voice_clone_prompt.pt"
 
 
+def voice_prompt_staged_rel(voice_id: str) -> str:
+    return f"voices/{voice_id}/voice_clone_prompt.staged.pt"
+
+
+def promote_voice_prompt(voice_id: str) -> str:
+    """Promote the staged clone prompt to the live prompt path.
+
+    Called when a clone_prompt job completes successfully: the .pt uploaded by
+    the worker lives at a staged path until then, so a failed or retried job
+    can never overwrite a previously approved prompt at the referenced path.
+    The staged file is moved into the live slot atomically via os.replace.
+
+    Returns the relative live prompt path.
+    """
+    staged = _root() / voice_prompt_staged_rel(voice_id)
+    live = _root() / voice_prompt_rel(voice_id)
+    live.parent.mkdir(parents=True, exist_ok=True)
+    if not staged.exists():
+        raise FileNotFoundError(voice_prompt_staged_rel(voice_id))
+    os.replace(staged, live)
+    return voice_prompt_rel(voice_id)
+
+
+def remove_staged_voice_prompt(voice_id: str) -> None:
+    """Remove a clone job's staged prompt file.
+
+    Called when a clone_prompt job fails or is requeued: the staged .pt from
+    the attempt is partial/unverified and must not survive, while any previously
+    approved live prompt is preserved. Best-effort: a failure here is logged but
+    never propagated.
+    """
+    target = _root() / voice_prompt_staged_rel(voice_id)
+    if target.exists():
+        try:
+            target.unlink()
+        except OSError as exc:
+            logger.warning(
+                "failed to remove staged voice prompt for %s: %s", voice_id, exc
+            )
+
+
 def narration_chunk_rel(narration_id: str, index: int) -> str:
     return f"narrations/{narration_id}/chunks/chunk_{index:03d}.wav"
 
