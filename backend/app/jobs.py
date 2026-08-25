@@ -46,7 +46,12 @@ def design_payload(voice: Voice, language: str, instruct: str, text: str) -> dic
 
 
 def clone_prompt_payload(voice: Voice) -> dict:
-    ref_audio = storage.read_bytes(voice.reference_audio_path)
+    # The clone is built from the voice's draft preview (the audio the user
+    # just approved), not the live reference: the previously approved
+    # reference.wav is left untouched until the clone succeeds, when it is
+    # promoted in complete_job. clone_prompt jobs are only ever enqueued by
+    # approve_voice, at which point the preview always exists.
+    ref_audio = storage.read_bytes(storage.voice_preview_rel(voice.id))
     return {
         "voice_id": voice.id,
         "language": voice.language,
@@ -159,6 +164,11 @@ def _recover_stale_job(db: Session, job: Job) -> None:
             shutil.rmtree(
                 storage.narration_chunk_dir(job.narration_id), ignore_errors=True
             )
+        elif job.type == "clone_prompt" and job.voice_id:
+            # Match fail_job: a requeued clone must start clean, so the stale
+            # staged .pt from the crashed attempt is dropped and the retry has
+            # to upload fresh.
+            storage.remove_staged_voice_prompt(job.voice_id)
     else:
         job.status = "failed"
         _mark_failed_owner_object(db, job, error)
@@ -252,11 +262,14 @@ def complete_job(
             # (see approve_voice).
     elif job.type == "clone_prompt":
         if voice.status == "approving":
-            # Only now that the clone has fully succeeded is the staged .pt
-            # promoted into the live prompt slot (the path referenced by
-            # prompt_pt_path). A failed/retried attempt leaves the previously
-            # approved prompt untouched.
+            # Only now that the clone has fully succeeded are both artifacts
+            # promoted into their live slots: the staged .pt becomes the live
+            # prompt (Phase #6), and the draft preview the user approved becomes
+            # the live reference. A failed/retried attempt leaves the previously
+            # approved reference.wav and prompt untouched.
             storage.promote_voice_prompt(voice.id)
+            promoted_ref = storage.promote_preview_to_reference(voice.id)
+            voice.reference_audio_path = promoted_ref
             voice.status = "approved"
             voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
     elif job.type == "narration":

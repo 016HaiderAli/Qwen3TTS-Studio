@@ -148,13 +148,11 @@ def approve_voice(
             status_code=409,
             detail="Approval is already in progress.",
         )
-    # Promote the preview the user just approved into the live reference slot
-    # BEFORE building the clone payload, so the new prompt is built from exactly
-    # this audio and the previously approved reference is superseded here.
-    promoted = storage.promote_preview_to_reference(voice.id)
-    db.execute(
-        update(Voice).where(Voice.id == voice.id).values(reference_audio_path=promoted)
-    )
+    # Do NOT promote the preview into the live reference slot here: the new
+    # clone is built from the draft preview directly (see clone_prompt_payload),
+    # and the previously approved reference.wav must stay untouched until the
+    # replacement clone succeeds (the promotion happens in complete_job). A
+    # failed approval therefore never destroys the approved reference audio.
     db.refresh(voice)
     payload = job_service.clone_prompt_payload(voice)
     job_service.enqueue(
