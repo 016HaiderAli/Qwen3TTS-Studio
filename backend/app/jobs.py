@@ -233,6 +233,12 @@ def complete_job(
             raise RuntimeError("voice record missing")
         if storage.safe_resolve(storage.voice_prompt_staged_rel(voice.id)) is None:
             raise RuntimeError("clone prompt artifact missing")
+        # The voice's draft preview must also exist: on success it is promoted
+        # into the live reference slot. If it is gone (external/manual
+        # interference), fail cleanly BEFORE any live slot is mutated so the
+        # previously approved prompt/reference are never destroyed.
+        if storage.safe_resolve(storage.voice_preview_rel(voice.id)) is None:
+            raise RuntimeError("voice preview artifact missing")
     elif job.type == "narration":
         narration = db.get(Narration, job.narration_id)
         if narration is None:
@@ -265,10 +271,15 @@ def complete_job(
             # Only now that the clone has fully succeeded are both artifacts
             # promoted into their live slots: the staged .pt becomes the live
             # prompt (Phase #6), and the draft preview the user approved becomes
-            # the live reference. A failed/retried attempt leaves the previously
-            # approved reference.wav and prompt untouched.
-            storage.promote_voice_prompt(voice.id)
+            # the live reference (Phase #7). The reference is promoted FIRST:
+            # both promotions are irreversible os.replace moves, so a crash or
+            # exception between them must never destroy the previously approved
+            # prompt (the narration-critical artifact). The reference audio can
+            # be re-derived via a redesign; the approved prompt cannot. A
+            # failed/retried attempt leaves the previously approved reference.wav
+            # and prompt untouched.
             promoted_ref = storage.promote_preview_to_reference(voice.id)
+            storage.promote_voice_prompt(voice.id)
             voice.reference_audio_path = promoted_ref
             voice.status = "approved"
             voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
