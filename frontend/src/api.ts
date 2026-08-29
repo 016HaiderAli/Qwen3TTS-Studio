@@ -70,7 +70,8 @@ export interface Voice {
 
 export interface Narration {
   id: string
-  voice_id: string
+  voice_id: string | null
+  voice_source?: string | null
   title: string
   script: string
   delivery_direction: string
@@ -87,8 +88,9 @@ export interface Narration {
 export interface NarrationListItem {
   id: string
   title: string
-  voice_id: string
-  voice_name: string
+  voice_id: string | null
+  voice_name: string | null
+  voice_source?: string | null
   status: Narration['status']
   duration_sec: number | null
   created_at: string
@@ -159,4 +161,21 @@ export const api = {
         updated_at: string
       }>
     >('/api/jobs'),
+
+  listBuiltinVoices: () =>
+    request<Array<{ id: string; description: string; native_language: string }>>(
+      '/api/builtin-voices',
+    ),
+
+  generateBuiltinVoice: (body: {
+    speaker: string
+    language: string
+    script: string
+    instruct: string
+    title: string
+  }) =>
+    request<Narration>('/api/builtin-voices/generate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 }

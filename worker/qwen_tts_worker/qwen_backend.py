@@ -54,6 +54,38 @@ class QwenBackend(InferenceBackend):
         self.config = config
         self._base_model = None
         self._design_model = None
+        self._custom_voice_model = None
+
+    # ---------- model lifecycle (notebook cells 11/17/19) ----------
+    def _load_base(self):
+        import torch
+        from qwen_tts import Qwen3TTSModel
+
+        if self._base_model is not None:
+            return self._base_model
+        logger.info("Loading Base model %s ...", self.config.qwen_model_base)
+        self._base_model = Qwen3TTSModel.from_pretrained(
+            self.config.qwen_model_base,
+            device_map=self.config.qwen_device,
+            dtype=getattr(torch, self.config.qwen_dtype),
+        )
+        logger.info("Base model loaded on %s", self.config.qwen_device)
+        return self._base_model
+
+    def _load_custom_voice(self):
+        import torch
+        from qwen_tts import Qwen3TTSModel
+
+        if self._custom_voice_model is not None:
+            return self._custom_voice_model
+        logger.info("Loading CustomVoice model %s ...", self.config.qwen_model_custom_voice)
+        self._custom_voice_model = Qwen3TTSModel.from_pretrained(
+            self.config.qwen_model_custom_voice,
+            device_map=self.config.qwen_device,
+            dtype=getattr(torch, self.config.qwen_dtype),
+        )
+        logger.info("CustomVoice model loaded")
+        return self._custom_voice_model
 
     # ---------- model lifecycle (notebook cells 11/17/19) ----------
     def _load_base(self):
@@ -194,6 +226,37 @@ class QwenBackend(InferenceBackend):
                     text=chunk,
                     language=language,
                     voice_clone_prompt=prompt_list,
+                )
+            data = _wav_bytes(wavs[0], sr)
+            duration = len(wavs[0]) / sr
+            outputs.append(
+                SynthesisOutput(data, int(sr), round(float(duration), 3))
+            )
+        return outputs
+
+    def generate_custom_voice(
+        self,
+        *,
+        chunks: list[str],
+        speaker: str,
+        language: str,
+        instruct: str,
+    ) -> list[SynthesisOutput]:
+        import torch
+
+        model = self._load_custom_voice()
+        outputs: list[SynthesisOutput] = []
+        for i, chunk in enumerate(chunks):
+            logger.info(
+                "custom_voice job: speaker=%s chunk %d/%d",
+                speaker, i + 1, len(chunks),
+            )
+            with torch.inference_mode():
+                wavs, sr = model.generate_custom_voice(
+                    text=chunk,
+                    language=language,
+                    speaker=speaker,
+                    instruct=instruct if instruct.strip() else None,
                 )
             data = _wav_bytes(wavs[0], sr)
             duration = len(wavs[0]) / sr

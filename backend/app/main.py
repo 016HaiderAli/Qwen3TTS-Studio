@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, files, internal, jobs, narrations, voices
+from .routers import auth, builtin_voices, files, internal, jobs, narrations, voices
 
 settings = get_settings()
 
@@ -44,6 +44,7 @@ def health() -> dict:
 
 app.include_router(auth.router)
 app.include_router(voices.router)
+app.include_router(builtin_voices.router)
 app.include_router(narrations.router)
 app.include_router(jobs.router)
 app.include_router(files.router)

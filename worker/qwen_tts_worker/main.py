@@ -125,6 +125,40 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
         )
         logger.info("Job %s narration succeeded (%d chunks)", job_id, len(outputs))
 
+    elif job_type == "custom_voice":
+        chunks = payload.get("chunks") or []
+        if not chunks:
+            raise ValueError("custom_voice job has no chunks")
+        speaker = payload.get("speaker") or ""
+        language = payload.get("language") or "English"
+        instruct = payload.get("instruct") or ""
+        logger.info(
+            "custom_voice job %s: speaker=%s language=%s instruct=%r chunks=%d",
+            job_id, speaker, language, instruct, len(chunks),
+        )
+        outputs = backend.generate_custom_voice(
+            chunks=chunks,
+            speaker=speaker,
+            language=language,
+            instruct=instruct,
+        )
+        if len(outputs) != len(chunks):
+            raise RuntimeError(
+                f"expected {len(chunks)} outputs, got {len(outputs)}"
+            )
+        sample_rate = outputs[0].sample_rate
+        durations = [o.duration_sec for o in outputs]
+        for i, out in enumerate(outputs):
+            logger.info(
+                "custom_voice job %s: chunk %d/%d sr=%d duration=%.3fs",
+                job_id, i + 1, len(chunks), out.sample_rate, out.duration_sec,
+            )
+            client.upload_artifact(job_id, f"chunk_{i}", out.wav_bytes, claim_token)
+        client.complete(
+            job_id, claim_token, sample_rate=sample_rate, durations=durations,
+        )
+        logger.info("Job %s custom_voice succeeded (%d chunks)", job_id, len(outputs))
+
     else:
         raise ValueError(f"unknown job type: {job_type}")
 

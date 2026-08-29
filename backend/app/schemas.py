@@ -55,12 +55,18 @@ class NarrationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    voice_id: str
+    voice_id: str | None = None
     title: str
     script: str
     delivery_direction: str
     language: str
     status: str
+    # "voice_clone" for user-approved voices, "custom_voice" for built-in
+    # Qwen speakers, None for jobs that have not been classified yet. The
+    # value is derived from the most recent Job row for the narration; a
+    # narration created via /api/builtin-voices/generate has voice_id NULL
+    # and voice_source="custom_voice".
+    voice_source: str | None = None
     chunk_count: int = 0
     chunks_done: int = 0
     duration_sec: float | None = None
@@ -72,8 +78,9 @@ class NarrationResponse(BaseModel):
 class NarrationListResponse(BaseModel):
     id: str
     title: str
-    voice_id: str
-    voice_name: str
+    voice_id: str | None = None
+    voice_name: str | None = None
+    voice_source: str | None = None
     status: str
     duration_sec: float | None
     created_at: datetime
@@ -105,6 +112,24 @@ class JobStatusResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+# ---------- Built-in voices (Qwen CustomVoice) ----------
+class BuiltinVoiceInfo(BaseModel):
+    id: str
+    description: str
+    native_language: str
+
+
+class BuiltinVoiceGenerateRequest(BaseModel):
+    speaker: str = Field(min_length=1, max_length=64)
+    language: str = Field(default="English", max_length=50)
+    script: str = Field(min_length=1, max_length=100_000)
+    # Natural-language delivery direction. Optional for CustomVoice (the
+    # model's `instruct` parameter); an empty string is forwarded as
+    # ``instruct=None`` to the model.
+    instruct: str = Field(default="", max_length=2_000)
+    title: str = Field(default="", max_length=300)
 
 
 # ---------- Internal worker API ----------

@@ -73,6 +73,28 @@ def narration_payload(narration: Narration, chunks: list[str]) -> dict:
     }
 
 
+def builtin_voice_payload(
+    narration: Narration,
+    speaker: str,
+    instruct: str,
+) -> dict:
+    """Payload for a ``custom_voice`` job (Qwen3-TTS CustomVoice).
+
+    The narration stores the full script verbatim; the worker treats it as a
+    single-chunk generation. ``voice_source`` is the explicit discriminator
+    that tells the worker and the future voice-clone pipeline apart from a
+    narration that uses a user-approved cloned voice.
+    """
+    return {
+        "voice_source": "custom_voice",
+        "narration_id": narration.id,
+        "speaker": speaker,
+        "language": narration.language,
+        "instruct": instruct,
+        "chunks": [narration.script],
+    }
+
+
 # ---------- enqueue ----------
 def enqueue(
     db: Session,
@@ -164,6 +186,10 @@ def _recover_stale_job(db: Session, job: Job) -> None:
             shutil.rmtree(
                 storage.narration_chunk_dir(job.narration_id), ignore_errors=True
             )
+        elif job.type == "custom_voice":
+            shutil.rmtree(
+                storage.narration_chunk_dir(job.narration_id), ignore_errors=True
+            )
         elif job.type == "clone_prompt" and job.voice_id:
             # Match fail_job: a requeued clone must start clean, so the stale
             # staged .pt from the crashed attempt is dropped and the retry has
@@ -201,6 +227,12 @@ def store_artifact(db: Session, job: Job, field: str, data: bytes) -> None:
         storage.write_bytes(storage.narration_chunk_rel(job.narration_id, index), data)
         total = _chunk_count(job)
         job.progress = min(99, int((index + 1) * 100 / max(total, 1)))
+    elif job.type == "custom_voice" and field == "audio":
+        # Built-in Qwen CustomVoice jobs produce a single WAV (one chunk).
+        # It is written to chunk_000 so the existing concat/serve pipeline
+        # handles the artifact identically to a user-narration chunk.
+        storage.write_bytes(storage.narration_chunk_rel(job.narration_id, 0), data)
+        job.progress = 99
     else:
         raise ValueError(f"unexpected artifact field for job type {job.type}: {field}")
     db.flush()
@@ -253,6 +285,19 @@ def complete_job(
         sr, duration = audio.concat_wav_files(
             existing, storage.root() / storage.narration_final_rel(narration.id)
         )
+    elif job.type == "custom_voice":
+        narration = db.get(Narration, job.narration_id)
+        if narration is None:
+            raise RuntimeError("narration record missing")
+        # A custom_voice job always produces exactly one WAV (chunk_000).
+        chunk_path = storage.narration_chunk_rel(narration.id, 0)
+        resolved = storage.safe_resolve(chunk_path)
+        if resolved is None:
+            raise RuntimeError("custom voice audio missing")
+        sr, duration = audio.concat_wav_files(
+            [resolved],
+            storage.root() / storage.narration_final_rel(narration.id),
+        )
 
     _clear_lease(job)
     job.status = "succeeded"
@@ -304,6 +349,21 @@ def complete_job(
         # the per-chunk files are transient intermediates, so drop them once the
         # narration is complete (best-effort, never fatal).
         clear_partial_chunks(narration.id)
+    elif job.type == "custom_voice":
+        # Single-chunk CustomVoice: the WAV metadata is the source of truth
+        # for sample rate / duration, identical to the narration branch.
+        if sample_rate is not None and int(sample_rate) != int(sr):
+            logger.warning(
+                "custom_voice job %s: worker reported sample_rate=%s but the "
+                "WAV is %d Hz; using the WAV metadata",
+                job.id, sample_rate, sr,
+            )
+        narration.final_audio_path = storage.narration_final_rel(narration.id)
+        narration.sample_rate = int(sr)
+        narration.duration_sec = duration
+        narration.status = "ready"
+        narration.chunk_durations_json = json.dumps(durations)
+        clear_partial_chunks(narration.id)
     db.flush()
 
 
@@ -314,6 +374,10 @@ def fail_job(db: Session, job: Job, error: str) -> None:
     if job.attempts < settings.max_job_attempts:
         job.status = "queued"
         if job.type == "narration":
+            shutil.rmtree(storage.narration_chunk_dir(job.narration_id), ignore_errors=True)
+        elif job.type == "custom_voice":
+            # A failed custom_voice attempt leaves a single partial chunk_000.
+            # Drop it so a retry must upload fresh.
             shutil.rmtree(storage.narration_chunk_dir(job.narration_id), ignore_errors=True)
         elif job.type == "clone_prompt" and job.voice_id:
             # The staged .pt from this attempt is partial/unverified: drop it so
@@ -334,6 +398,15 @@ def _mark_failed_owner_object(db: Session, job: Job, error: str) -> None:
             narration.error = error[:4000]
         # No further attempts will run: the intermediate chunk files are no
         # longer needed, so drop them (best-effort, never fatal).
+        clear_partial_chunks(job.narration_id)
+    elif job.type == "custom_voice" and job.narration_id:
+        # Built-in voice narrations share the Narration lifecycle with user
+        # narrations, so a terminally failed custom_voice job marks its
+        # Narration as failed in the same way.
+        narration = db.get(Narration, job.narration_id)
+        if narration is not None:
+            narration.status = "failed"
+            narration.error = error[:4000]
         clear_partial_chunks(job.narration_id)
     elif job.type == "design" and job.voice_id:
         voice = db.get(Voice, job.voice_id)

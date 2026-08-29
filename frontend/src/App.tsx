@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage'
 import { VoiceLibraryPage } from './pages/VoiceLibraryPage'
 import { NarrationStudioPage } from './pages/NarrationStudioPage'
 import { HistoryPage } from './pages/HistoryPage'
+import { BuiltinVoicesPage } from './pages/BuiltinVoicesPage'
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null)
@@ -62,6 +63,7 @@ export default function App() {
         </Link>
         <nav className="topnav">
           <NavLink to="/voices">Voices</NavLink>
+          <NavLink to="/built-in">Built-in voices</NavLink>
           <NavLink to="/narration">New narration</NavLink>
           <NavLink to="/history">History</NavLink>
         </nav>
@@ -77,6 +79,7 @@ export default function App() {
       <main className="content">
         <Routes>
           <Route path="/voices" element={<VoiceLibraryPage />} />
+          <Route path="/built-in" element={<BuiltinVoicesPage />} />
           <Route path="/narration" element={<NarrationStudioPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="*" element={<VoiceLibraryPage />} />

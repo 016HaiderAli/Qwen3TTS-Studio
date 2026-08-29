@@ -45,6 +45,17 @@ class InferenceBackend(ABC):
     ) -> list[SynthesisOutput]:
         """Generate one WAV per chunk using the voice-clone prompt."""
 
+    @abstractmethod
+    def generate_custom_voice(
+        self,
+        *,
+        chunks: list[str],
+        speaker: str,
+        language: str,
+        instruct: str,
+    ) -> list[SynthesisOutput]:
+        """Generate one WAV per chunk using a Qwen CustomVoice speaker."""
+
 
 def _hash_int(*parts: str) -> int:
     h = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
@@ -113,10 +124,25 @@ class MockBackend(InferenceBackend):
         outputs = []
         for i, chunk in enumerate(chunks):
             seed = _hash_int("narration", str(i), chunk, instruct, language, prompt_pt_b64[:64])
-            # A chunk that contains paragraph breaks (blank lines) is "delivered"
-            # with a slightly longer pause (longer duration).
             base_dur = 1.2 + (len(chunk.split()) / 80.0) * 2.4
             if "\n\n" in chunk:
                 base_dur += 0.4
             outputs.append(self._tone(seed, base_dur, base_freq=220.0 + i * 25))
+        return outputs
+
+    def generate_custom_voice(
+        self,
+        *,
+        chunks: list[str],
+        speaker: str,
+        language: str,
+        instruct: str,
+    ) -> list[SynthesisOutput]:
+        outputs = []
+        for i, chunk in enumerate(chunks):
+            seed = _hash_int("custom_voice", speaker, str(i), chunk, instruct, language)
+            base_dur = 1.2 + (len(chunk.split()) / 80.0) * 2.4
+            if "\n\n" in chunk:
+                base_dur += 0.4
+            outputs.append(self._tone(seed, base_dur, base_freq=180.0 + i * 15))
         return outputs

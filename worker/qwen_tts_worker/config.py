@@ -29,6 +29,7 @@ class WorkerConfig:
     # qwen backend (real GPU worker)
     qwen_model_design: str = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
     qwen_model_base: str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+    qwen_model_custom_voice: str = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
     qwen_device: str = "cuda:0"
     qwen_dtype: str = "bfloat16"
     qwen_keep_design_loaded: bool = False
@@ -49,6 +50,9 @@ class WorkerConfig:
             ),
             qwen_model_base=os.environ.get(
                 "QWEN_MODEL_BASE", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+            ),
+            qwen_model_custom_voice=os.environ.get(
+                "QWEN_MODEL_CUSTOM_VOICE", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
             ),
             qwen_device=os.environ.get("QWEN_DEVICE", "cuda:0"),
             qwen_dtype=os.environ.get("QWEN_DTYPE", "bfloat16"),
