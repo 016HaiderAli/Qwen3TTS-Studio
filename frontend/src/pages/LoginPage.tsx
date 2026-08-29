@@ -21,6 +21,22 @@ export function LoginPage() {
     }
   }
 
+  const devLogin = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const resp = await fetch('/auth/dev-login?email=demo@example.com', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      if (!resp.ok) throw new Error(`Dev login failed (${resp.status})`)
+      window.location.href = '/voices'
+    } catch (err) {
+      setBusy(false)
+      setError(err instanceof Error ? err.message : 'Dev login failed.')
+    }
+  }
+
   return (
     <div className="login-screen">
       <div className="login-card">
@@ -34,6 +50,14 @@ export function LoginPage() {
           disabled={busy}
         >
           {busy ? 'Redirecting…' : 'Continue with Google'}
+        </button>
+        <button
+          className="btn btn-ghost btn-block"
+          onClick={devLogin}
+          disabled={busy}
+          style={{ marginTop: '0.5rem' }}
+        >
+          Sign in as demo (dev)
         </button>
         {error && (
           <p className="error-banner" role="alert">

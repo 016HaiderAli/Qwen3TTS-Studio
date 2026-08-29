@@ -88,6 +88,7 @@ class JobResponse(BaseModel):
     status: str
     voice_id: str | None = None
     narration_id: str | None = None
+    required_backend: str
     progress: int
     attempts: int
     error: str | None = None

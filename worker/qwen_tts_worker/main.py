@@ -47,42 +47,66 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
     job_type = claim["type"]
     payload = claim.get("payload") or {}
     claim_token = claim.get("claim_token") or ""
-    logger.info("Processing job %s (type=%s)", job_id, job_type)
+    logger.info(
+        "Processing job %s (type=%s, backend=%s)",
+        job_id, job_type, backend.name,
+    )
 
     if job_type == "design":
-        out = backend.design(
-            language=payload.get("language") or "English",
-            instruct=payload.get("instruct") or "",
-            text=payload.get("text") or "",
+        language = payload.get("language") or "English"
+        instruct = payload.get("instruct") or ""
+        text = payload.get("text") or ""
+        logger.info(
+            "design job %s: language=%s instruct=%r text=%r",
+            job_id, language, instruct, text,
+        )
+        logger.info("design job %s: inference started", job_id)
+        out = backend.design(language=language, instruct=instruct, text=text)
+        logger.info(
+            "design job %s: inference complete sr=%d duration=%.3fs bytes=%d",
+            job_id, out.sample_rate, out.duration_sec, len(out.wav_bytes),
         )
         client.upload_artifact(job_id, "reference_audio", out.wav_bytes, claim_token)
         client.complete(
-            job_id,
-            claim_token,
-            sample_rate=out.sample_rate,
-            durations=[out.duration_sec],
+            job_id, claim_token, sample_rate=out.sample_rate, durations=[out.duration_sec],
         )
-        logger.info("Job %s design complete (%.2fs)", job_id, out.duration_sec)
+        logger.info("Job %s design succeeded", job_id)
 
     elif job_type == "clone_prompt":
+        language = payload.get("language") or "English"
+        ref_text = payload.get("ref_text") or ""
+        ref_audio_b64 = payload.get("ref_audio_b64") or ""
+        logger.info(
+            "clone_prompt job %s: language=%s ref_text=%r ref_audio_b64_len=%d",
+            job_id, language, ref_text, len(ref_audio_b64),
+        )
+        logger.info("clone_prompt job %s: inference started", job_id)
         pt_bytes = backend.create_clone_prompt(
-            ref_audio_b64=payload.get("ref_audio_b64") or "",
-            ref_text=payload.get("ref_text") or "",
-            language=payload.get("language") or "English",
+            ref_audio_b64=ref_audio_b64, ref_text=ref_text, language=language,
+        )
+        logger.info(
+            "clone_prompt job %s: inference complete bytes=%d",
+            job_id, len(pt_bytes),
         )
         client.upload_artifact(job_id, "prompt_pt", pt_bytes, claim_token)
         client.complete(job_id, claim_token)
-        logger.info("Job %s clone prompt complete (%d bytes)", job_id, len(pt_bytes))
+        logger.info("Job %s clone_prompt succeeded", job_id)
 
     elif job_type == "narration":
         chunks = payload.get("chunks") or []
         if not chunks:
             raise ValueError("narration job has no chunks")
+        language = payload.get("language") or "English"
+        instruct = payload.get("instruct") or ""
+        logger.info(
+            "narration job %s: language=%s instruct=%r chunks=%d",
+            job_id, language, instruct, len(chunks),
+        )
         outputs = backend.narrate(
             chunks=chunks,
             prompt_pt_b64=payload.get("prompt_pt_b64") or "",
-            language=payload.get("language") or "English",
-            instruct=payload.get("instruct") or "",
+            language=language,
+            instruct=instruct,
         )
         if len(outputs) != len(chunks):
             raise RuntimeError(
@@ -91,14 +115,15 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
         sample_rate = outputs[0].sample_rate
         durations = [o.duration_sec for o in outputs]
         for i, out in enumerate(outputs):
+            logger.info(
+                "narration job %s: chunk %d/%d sr=%d duration=%.3fs",
+                job_id, i + 1, len(chunks), out.sample_rate, out.duration_sec,
+            )
             client.upload_artifact(job_id, f"chunk_{i}", out.wav_bytes, claim_token)
         client.complete(
-            job_id,
-            claim_token,
-            sample_rate=sample_rate,
-            durations=durations,
+            job_id, claim_token, sample_rate=sample_rate, durations=durations,
         )
-        logger.info("Job %s narration complete (%d chunks)", job_id, len(outputs))
+        logger.info("Job %s narration succeeded (%d chunks)", job_id, len(outputs))
 
     else:
         raise ValueError(f"unknown job type: {job_type}")
@@ -164,6 +189,14 @@ def main(argv: list[str] | None = None) -> int:
             return 3
 
     backend = _build_backend(config)
+    if backend.name == "qwen":
+        logger.info(
+            "Qwen backend configured: design_model=%s base_model=%s device=%s dtype=%s",
+            config.qwen_model_design,
+            config.qwen_model_base,
+            config.qwen_device,
+            config.qwen_dtype,
+        )
     client = WorkerAPIClient(config)
 
     try:

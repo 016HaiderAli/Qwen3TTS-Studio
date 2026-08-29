@@ -99,6 +99,7 @@ export interface JobStatus {
     id: string
     type: string
     status: string
+    required_backend: 'qwen' | 'mock'
     progress: number
     error: string | null
   }
@@ -141,4 +142,21 @@ export const api = {
     request<void>(`/api/narrations/${id}`, { method: 'DELETE' }),
 
   job: (id: string) => request<JobStatus>(`/api/jobs/${id}`),
+
+  listJobs: () =>
+    request<
+      Array<{
+        id: string
+        type: string
+        status: string
+        voice_id: string | null
+        narration_id: string | null
+        required_backend: 'qwen' | 'mock'
+        progress: number
+        attempts: number
+        error: string | null
+        created_at: string
+        updated_at: string
+      }>
+    >('/api/jobs'),
 }

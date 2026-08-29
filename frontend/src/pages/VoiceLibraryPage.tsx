@@ -81,6 +81,7 @@ export function VoiceLibraryPage() {
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [highlightId, setHighlightId] = useState<string | null>(null)
+  const [latestDesignJob, setLatestDesignJob] = useState<Record<string, { error: string | null; required_backend: 'qwen' | 'mock' }>>({})
   const announcedRef = useRef<Set<string>>(new Set())
   const prevStatusRef = useRef<Record<string, string>>({})
   const seededRef = useRef(false)
@@ -130,6 +131,30 @@ export function VoiceLibraryPage() {
   useEffect(() => {
     void load()
   }, [])
+
+  // Pull the latest design job per voice so a real-model failure surfaces
+  // the actual error text (instead of a silent reversion to "draft").
+  const refreshLatestDesignJobs = async () => {
+    try {
+      const jobs = await api.listJobs()
+      const byVoice: Record<string, { error: string | null; required_backend: 'qwen' | 'mock' }> = {}
+      for (const job of jobs) {
+        if (job.type !== 'design' || !job.voice_id) continue
+        if (byVoice[job.voice_id]) continue
+        byVoice[job.voice_id] = {
+          error: job.error,
+          required_backend: job.required_backend,
+        }
+      }
+      setLatestDesignJob(byVoice)
+    } catch {
+      /* best-effort: don't surface listing errors here */
+    }
+  }
+
+  useEffect(() => {
+    void refreshLatestDesignJobs()
+  }, [voices.length])
 
   // Announce status transitions exactly once per voice+transition.
   useEffect(() => {
@@ -238,6 +263,7 @@ export function VoiceLibraryPage() {
             <VoiceCard
               key={voice.id}
               voice={voice}
+              latestDesignJob={latestDesignJob[voice.id] ?? null}
               highlighted={voice.id === highlightId}
               approvePending={approvingId === voice.id}
               onDesign={() => openDesign(voice)}
@@ -500,6 +526,7 @@ function CharCount({ value, max }: { value: string; max: number }) {
 
 function VoiceCard({
   voice,
+  latestDesignJob,
   highlighted,
   approvePending,
   onDesign,
@@ -508,6 +535,7 @@ function VoiceCard({
   onUse,
 }: {
   voice: Voice
+  latestDesignJob: { error: string | null; required_backend: 'qwen' | 'mock' } | null
   highlighted: boolean
   approvePending: boolean
   onDesign: () => void
@@ -526,6 +554,10 @@ function VoiceCard({
   const elapsed = busyStatus
     ? formatElapsed(Date.now() - new Date(voice.updated_at).getTime())
     : null
+  const workerLabel =
+    latestDesignJob?.required_backend === 'mock'
+      ? 'mock worker (synthetic audio — not real speech)'
+      : 'Qwen3-TTS (real model)'
   return (
     <article className={`voice-card${highlighted ? ' success-highlight' : ''}`}>
       <div className="voice-card-head">
@@ -544,6 +576,7 @@ function VoiceCard({
               ? 'Creating a new version of your approved voice…'
               : 'Creating your voice preview…'}
           </span>
+          <span className="elapsed"> · Worker: {workerLabel}</span>
           {elapsed && <span className="elapsed"> · {elapsed} elapsed</span>}
         </p>
       )}
@@ -556,6 +589,11 @@ function VoiceCard({
               : 'Saving this voice for narrations…'}
           </span>
           {elapsed && <span className="elapsed"> · {elapsed} elapsed</span>}
+        </p>
+      )}
+      {voice.status === 'draft' && latestDesignJob?.error && (
+        <p className="error-banner" role="alert">
+          Design failed: {latestDesignJob.error}
         </p>
       )}
       {hasApprovedPrompt && voice.status === 'approved' && (

@@ -45,13 +45,11 @@ def test_oauth_callback_creates_user_and_session(client, monkeypatch):
     login = client.get("/auth/login")
     assert login.status_code == 200
 
-    # The cookie value is HTTP-cookie-escaped; unquote it via SimpleCookie.
-    import http.cookies
-    import json
-
-    jar = http.cookies.SimpleCookie()
-    jar.load(login.headers["set-cookie"])
-    payload = json.loads(jar[auth_router._STATE_COOKIE].value)
+    # The cookie value is now base64-encoded JSON (the raw-JSON form triggered
+    # a SimpleCookie comma-escape that some browsers did not unescape
+    # correctly). Use the same decoder the callback uses to read it.
+    payload = auth_router._decode_state_payload(login.cookies[auth_router._STATE_COOKIE])
+    assert payload is not None, "state cookie could not be decoded"
 
     # TestClient already carries the state cookie from /auth/login.
     client.get(f"/auth/callback?code=abc&state={payload['state']}")
