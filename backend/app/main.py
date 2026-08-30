@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from .config import get_settings
 from .db import init_db
 from .routers import auth, builtin_voices, files, internal, jobs, narrations, voices
+from .voice import ensure_builtin_voice
 
 settings = get_settings()
 
@@ -35,6 +36,7 @@ async def unhandled_exception_handler(request, exc):  # pragma: no cover
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    ensure_builtin_voice()
 
 
 @app.get("/api/health")

@@ -13,6 +13,7 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..models import Job, Narration, User, Voice
 from ..schemas import NarrationCreate, NarrationListResponse, NarrationResponse
+from ..voice import BUILTIN_VOICE_NAME, get_builtin_voice_id
 
 router = APIRouter(prefix="/api/narrations", tags=["narrations"])
 settings = get_settings()
@@ -65,18 +66,23 @@ def list_narrations(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    builtin_id = get_builtin_voice_id()
     rows = db.execute(
         select(Narration, Voice.name)
         .join(Voice, Narration.voice_id == Voice.id)
-        .where(Narration.owner_id == user.id)
+        .where(
+            (Narration.owner_id == user.id)
+            & ((Voice.owner_id == user.id) | (Voice.id == builtin_id))
+        )
         .order_by(Narration.created_at.desc())
     ).all()
     return [
         NarrationListResponse(
             id=n.id,
             title=n.title,
-            voice_id=n.voice_id,
-            voice_name=voice_name,
+            voice_id=n.voice_id if n.voice_id != builtin_id else None,
+            voice_name=None if n.voice_id == builtin_id else voice_name,
+            voice_source="custom_voice" if n.voice_id == builtin_id else None,
             status=n.status,
             duration_sec=n.duration_sec,
             created_at=n.created_at,

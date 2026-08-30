@@ -227,10 +227,14 @@ def store_artifact(db: Session, job: Job, field: str, data: bytes) -> None:
         storage.write_bytes(storage.narration_chunk_rel(job.narration_id, index), data)
         total = _chunk_count(job)
         job.progress = min(99, int((index + 1) * 100 / max(total, 1)))
-    elif job.type == "custom_voice" and field == "audio":
+    elif job.type == "custom_voice" and (
+        field == "audio" or (field.startswith("chunk_"))
+    ):
         # Built-in Qwen CustomVoice jobs produce a single WAV (one chunk).
-        # It is written to chunk_000 so the existing concat/serve pipeline
-        # handles the artifact identically to a user-narration chunk.
+        # Accept either the descriptive "audio" name OR "chunk_0" (the name
+        # the mock/real worker uses to stay consistent with the narration
+        # upload convention). The file lands at chunk_000 so the existing
+        # concat/serve pipeline handles the artifact identically.
         storage.write_bytes(storage.narration_chunk_rel(job.narration_id, 0), data)
         job.progress = 99
     else:

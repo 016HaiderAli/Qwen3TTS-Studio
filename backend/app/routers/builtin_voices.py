@@ -14,6 +14,7 @@ from ..schemas import (
     BuiltinVoiceInfo,
     NarrationResponse,
 )
+from ..voice import get_builtin_voice_id
 
 router = APIRouter(prefix="/api/builtin-voices", tags=["builtin-voices"])
 
@@ -41,7 +42,7 @@ def generate_builtin_voice(
 
     narration = Narration(
         owner_id=user.id,
-        voice_id=None,
+        voice_id=get_builtin_voice_id(),
         title=body.title.strip() or f"Built-in: {speaker_info.id}",
         script=script,
         delivery_direction=body.instruct.strip(),

@@ -113,7 +113,8 @@ def _create_and_finish_narration(client, voice_id, wav_bytes) -> dict:
 
 def _count(table: str) -> int:
     with engine.connect() as conn:
-        return conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
+        extra = " WHERE id != '00000000-0000-0000-0000-000000000000'" if table == "voices" else ""
+        return conn.execute(text(f"SELECT COUNT(*) FROM {table}{extra}")).scalar()
 
 
 def test_voice_delete_cascades_narrations_jobs_and_artifacts(
