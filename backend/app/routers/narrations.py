@@ -30,24 +30,15 @@ def _get_owned_narration(db: Session, narration_id: str, user: User) -> Narratio
     return row
 
 
-def _serialize(narration: Narration) -> dict:
-    chunks = json.loads(narration.chunks_json or "[]")
-    done = _chunks_on_disk(narration.id, len(chunks))
-    return {
-        "id": narration.id,
-        "voice_id": narration.voice_id,
-        "title": narration.title,
-        "script": narration.script,
-        "delivery_direction": narration.delivery_direction,
-        "language": narration.language,
-        "status": narration.status,
-        "chunk_count": len(chunks),
-        "chunks_done": done,
-        "duration_sec": narration.duration_sec,
-        "sample_rate": narration.sample_rate,
-        "error": narration.error,
-        "created_at": narration.created_at,
-    }
+def _dialogue_info(job_payload: dict | None) -> tuple[int, list[dict]]:
+    """Return (speaker_count, dialogue_segments) from a job payload dict."""
+    if not job_payload:
+        return 1, []
+    segs = job_payload.get("dialogue_segments")
+    if segs:
+        speakers = set(seg.get("speaker", "") for seg in segs)
+        return max(1, len(speakers)), list(segs)
+    return 1, []
 
 
 def _chunks_on_disk(narration_id: str, count: int) -> int:
@@ -61,12 +52,36 @@ def _chunks_on_disk(narration_id: str, count: int) -> int:
     return done
 
 
+def _serialize(narration: Narration, job_payload: dict | None = None) -> dict:
+    chunks = json.loads(narration.chunks_json or "[]")
+    done = _chunks_on_disk(narration.id, len(chunks))
+    speaker_count, dialogue_segs = _dialogue_info(job_payload)
+    return {
+        "id": narration.id,
+        "voice_id": narration.voice_id,
+        "title": narration.title,
+        "script": narration.script,
+        "delivery_direction": narration.delivery_direction,
+        "language": narration.language,
+        "status": narration.status,
+        "dialogue_speaker_count": speaker_count,
+        "dialogue_segments": dialogue_segs,
+        "chunk_count": len(chunks),
+        "chunks_done": done,
+        "duration_sec": narration.duration_sec,
+        "sample_rate": narration.sample_rate,
+        "error": narration.error,
+        "created_at": narration.created_at,
+    }
+
+
 @router.get("", response_model=list[NarrationListResponse])
 def list_narrations(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     builtin_id = get_builtin_voice_id()
+
     rows = db.execute(
         select(Narration, Voice.name)
         .join(Voice, Narration.voice_id == Voice.id)
@@ -76,19 +91,51 @@ def list_narrations(
         )
         .order_by(Narration.created_at.desc())
     ).all()
-    return [
-        NarrationListResponse(
-            id=n.id,
-            title=n.title,
-            voice_id=n.voice_id if n.voice_id != builtin_id else None,
-            voice_name=None if n.voice_id == builtin_id else voice_name,
-            voice_source="custom_voice" if n.voice_id == builtin_id else None,
-            status=n.status,
-            duration_sec=n.duration_sec,
-            created_at=n.created_at,
+
+    if not rows:
+        return []
+
+    narration_ids = [n.id for n, _ in rows]
+
+    latest_jobs = db.execute(
+        select(Job.narration_id, Job.payload_json)
+        .where(Job.narration_id.in_(narration_ids))
+        .where(Job.owner_id == user.id)
+        .where(Job.narration_id.isnot(None))
+    ).all()
+
+    payload_by_narration = {
+        narration_id: payload_json
+        for narration_id, payload_json in latest_jobs
+    }
+
+    latest_payload_by_narration: dict[str, dict | None] = {}
+    for narration_id in narration_ids:
+        payloads_for_narration = [
+            json.loads(payload) if payload else None
+            for (nid, payload) in latest_jobs
+            if nid == narration_id
+        ]
+        latest_payload_by_narration[narration_id] = payloads_for_narration[-1] if payloads_for_narration else None
+
+    results: list[NarrationListResponse] = []
+    for n, voice_name in rows:
+        job_payload = latest_payload_by_narration.get(n.id)
+        speaker_count, _ = _dialogue_info(job_payload)
+        results.append(
+            NarrationListResponse(
+                id=n.id,
+                title=n.title,
+                voice_id=n.voice_id if n.voice_id != builtin_id else None,
+                voice_name=None if n.voice_id == builtin_id else voice_name,
+                voice_source="custom_voice" if n.voice_id == builtin_id else None,
+                dialogue_speaker_count=speaker_count,
+                status=n.status,
+                duration_sec=n.duration_sec,
+                created_at=n.created_at,
+            )
         )
-        for n, voice_name in rows
-    ]
+    return results
 
 
 @router.post("", response_model=NarrationResponse, status_code=status.HTTP_201_CREATED)
@@ -136,7 +183,7 @@ def create_narration(
     db.flush()
 
     payload = job_service.narration_payload(narration, chunks)
-    job_service.enqueue(
+    job = job_service.enqueue(
         db,
         owner_id=user.id,
         type_="narration",
@@ -146,7 +193,8 @@ def create_narration(
     )
     db.commit()
     db.refresh(narration)
-    return _serialize(narration)
+    job_payload = json.loads(job.payload_json) if job.payload_json else None
+    return _serialize(narration, job_payload)
 
 
 @router.get("/{narration_id}", response_model=NarrationResponse)
@@ -155,7 +203,15 @@ def get_narration(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return _serialize(_get_owned_narration(db, narration_id, user))
+    narration = _get_owned_narration(db, narration_id, user)
+    latest_job = db.execute(
+        select(Job)
+        .where(Job.narration_id == narration_id, Job.owner_id == user.id)
+        .order_by(Job.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    job_payload = json.loads(latest_job.payload_json) if latest_job and latest_job.payload_json else None
+    return _serialize(narration, job_payload)
 
 
 @router.delete("/{narration_id}", status_code=status.HTTP_204_NO_CONTENT)

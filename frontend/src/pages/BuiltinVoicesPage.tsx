@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api, ApiError, type Narration } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { StatusBadge } from '../components/StatusBadge'
-import { EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
+import { DEMO_DIALOGUE_SCRIPT, EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
 import { SPEAKERS, getSpeaker } from '../customVoices'
 import { formatElapsed } from '../format'
 import { useInsertSpeakerTag } from '../useInsertSpeakerTag'
@@ -225,6 +225,16 @@ export function BuiltinVoicesPage() {
                     }}
                   >
                     Insert
+                  </button>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ fontSize: '0.8rem' }}
+                    onClick={() => setScript(DEMO_DIALOGUE_SCRIPT)}
+                  >
+                    Load demo dialogue
                   </button>
                 </div>
                 <textarea

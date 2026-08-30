@@ -77,6 +77,8 @@ export interface Narration {
   delivery_direction: string
   language: string
   status: 'ready' | 'queued' | 'running' | 'failed'
+  dialogue_speaker_count: number
+  dialogue_segments: Array<{ speaker: string; text: string; instruct?: string }>
   chunk_count: number
   chunks_done: number
   duration_sec: number | null
@@ -91,6 +93,7 @@ export interface NarrationListItem {
   voice_id: string | null
   voice_name: string | null
   voice_source?: string | null
+  dialogue_speaker_count: number
   status: Narration['status']
   duration_sec: number | null
   created_at: string
@@ -178,4 +181,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  runCleanup: () =>
+    request<{
+      orphaned_chunks_swept: number
+      stale_jobs_pruned: number
+      orphaned_artifacts_pruned: number
+    }>('/api/maintenance/cleanup', { method: 'POST' }),
 }

@@ -125,6 +125,7 @@ def generate_builtin_voice(
     )
     db.commit()
     db.refresh(narration)
+    seg_count = max(1, len(set(s["speaker"] for s in dialogue_segments))) if dialogue_segments else 1
     return NarrationResponse(
         id=narration.id,
         voice_id=None,
@@ -134,6 +135,8 @@ def generate_builtin_voice(
         language=narration.language,
         status=narration.status,
         voice_source="custom_voice",
+        dialogue_speaker_count=seg_count,
+        dialogue_segments=dialogue_segments or [],
         chunk_count=len(dialogue_segments) if dialogue_segments else 1,
         chunks_done=0,
         duration_sec=None,

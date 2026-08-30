@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, type NarrationListItem } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
+import { DialogueSegmentDisplay } from '../components/DialogueSegmentDisplay'
 import { StatusBadge } from '../components/StatusBadge'
 import { formatElapsed } from '../format'
 
@@ -13,6 +14,11 @@ export function HistoryPage() {
   const [errorDetailId, setErrorDetailId] = useState<string | null>(null)
   const [errorDetailBody, setErrorDetailBody] = useState<Record<string, string>>({})
   const [errorDetailFailure, setErrorDetailFailure] = useState<Record<string, string>>({})
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [expandedNarration, setExpandedNarration] = useState<{
+    id: string
+    dialogue_segments: Array<{ speaker: string; text: string; instruct?: string }>
+  } | null>(null)
   const errorDetailLoadingRef = useRef<Set<string>>(new Set())
   const announcedRef = useRef<Set<string>>(new Set())
   const seededRef = useRef(false)
@@ -104,6 +110,22 @@ export function HistoryPage() {
     }
   }
 
+  const toggleExpand = async (id: string) => {
+    if (expandedId === id) {
+      setExpandedId(null)
+      setExpandedNarration(null)
+      return
+    }
+    setExpandedId(id)
+    if (expandedNarration && expandedNarration.id === id) return
+    try {
+      const narration = await api.getNarration(id)
+      setExpandedNarration({ id, dialogue_segments: narration.dialogue_segments })
+    } catch {
+      setExpandedId(null)
+    }
+  }
+
   return (
     <section>
       <div className="page-head">
@@ -148,6 +170,11 @@ export function HistoryPage() {
                     {elapsed ? ` · ${elapsed} elapsed` : ''}
                   </p>
                   <StatusBadge status={item.status} />
+                  {item.dialogue_speaker_count > 1 && (
+                    <span className="multi-speaker-badge">
+                      {item.dialogue_speaker_count}-Speaker
+                    </span>
+                  )}
                 </div>
                 {item.status === 'ready' && (
                   <div className="history-actions">
@@ -171,6 +198,15 @@ export function HistoryPage() {
                     Reuse in studio
                   </Link>
                 )}
+                {item.dialogue_speaker_count > 1 && (
+                  <button
+                    className="btn"
+                    aria-expanded={expandedId === item.id}
+                    onClick={() => void toggleExpand(item.id)}
+                  >
+                    {expandedId === item.id ? 'Hide' : 'Show'} dialogue
+                  </button>
+                )}
                 {item.status === 'failed' && (
                   <button
                     className="btn"
@@ -187,7 +223,12 @@ export function HistoryPage() {
                 >
                   Delete
                 </button>
-                {item.status === 'failed' && errorDetailId === item.id && (
+                {expandedId === item.id && expandedNarration && (
+                  <div className="history-error-detail">
+                    <DialogueSegmentDisplay segments={expandedNarration.dialogue_segments} />
+                  </div>
+                )}
+                {!expandedNarration && item.status === 'failed' && errorDetailId === item.id && (
                   <div
                     id={`narration-error-${item.id}`}
                     className="history-error-detail"

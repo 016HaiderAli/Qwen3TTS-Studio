@@ -67,6 +67,13 @@ class NarrationResponse(BaseModel):
     # narration created via /api/builtin-voices/generate has voice_id NULL
     # and voice_source="custom_voice".
     voice_source: str | None = None
+    # Number of distinct speakers in the narration. 1 = single-speaker.
+    # Used by the frontend to show a Multi-Speaker badge and render dialogue
+    # segment details.
+    dialogue_speaker_count: int = 1
+    # List of dialogue segments with speaker/text pairs, present only for
+    # multi-speaker narrations. Derived from the job payload at serve time.
+    dialogue_segments: list[dict] = []
     chunk_count: int = 0
     chunks_done: int = 0
     duration_sec: float | None = None
@@ -81,6 +88,7 @@ class NarrationListResponse(BaseModel):
     voice_id: str | None = None
     voice_name: str | None = None
     voice_source: str | None = None
+    dialogue_speaker_count: int = 1
     status: str
     duration_sec: float | None
     created_at: datetime

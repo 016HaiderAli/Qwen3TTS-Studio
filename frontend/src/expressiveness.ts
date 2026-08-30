@@ -28,6 +28,9 @@ export const EXPRESSIVE_PRESETS: ExpressivePreset[] = [
   },
 ]
 
+export const DEMO_DIALOGUE_SCRIPT =
+  "[Speaker: Ryan] Did you hear about the new open-source Qwen3-TTS engine? [Speaker: Serena] [instruct: Speak with warm curiosity] Yes! It runs local web UI with remote GPU worker pipelines seamlessly."
+
 export function applyInstructPreset(
   currentInstruct: string,
   preset: ExpressivePreset,

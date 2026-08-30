@@ -4,7 +4,7 @@ import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { ProgressBar } from '../components/ProgressBar'
 import { StatusBadge } from '../components/StatusBadge'
-import { EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
+import { DEMO_DIALOGUE_SCRIPT, EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
 import { formatElapsed } from '../format'
 import { useInsertSpeakerTag } from '../useInsertSpeakerTag'
 
@@ -302,6 +302,16 @@ export function NarrationStudioPage() {
               }}
             >
               Insert
+            </button>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              className="btn"
+              style={{ fontSize: '0.8rem' }}
+              onClick={() => setScript(DEMO_DIALOGUE_SCRIPT)}
+            >
+              Load demo dialogue
             </button>
           </div>
           <label>
