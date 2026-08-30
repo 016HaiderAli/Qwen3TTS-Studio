@@ -1,25 +1,25 @@
 /* ====== Design tokens ====== */
 :root {
-  --bg: #0d0e12;
-  --panel: #161821;
-  --panel-2: #1e2130;
-  --panel-3: #252a3d;
-  --border: #2a2e3d;
-  --border-bright: #3a3f57;
-  --text: #f3f4f6;
-  --text-secondary: #c9cdd8;
-  --muted: #8b90a7;
-  --primary: #6c8cff;
-  --primary-dark: #4f6ee0;
-  --primary-glow: rgba(108, 140, 255, 0.25);
+  --bg: #0f1117;
+  --panel: #181b25;
+  --panel-2: #1f2330;
+  --panel-3: #272b3d;
+  --border: #262b3d;
+  --border-bright: #3a4157;
+  --text: #f8fafc;
+  --text-secondary: #94a3b8;
+  --muted: #64748b;
+  --primary: #14b8a6;
+  --primary-dark: #0d9488;
+  --primary-glow: rgba(20, 184, 166, 0.15);
   --success: #34d399;
-  --success-dim: rgba(52, 211, 153, 0.15);
+  --success-dim: rgba(52, 211, 153, 0.12);
   --danger: #f87171;
   --danger-dim: rgba(248, 113, 113, 0.12);
   --warning: #fbbf24;
-  --warning-dim: rgba(251, 191, 36, 0.15);
-  --accent: #6c8cff;
-  --accent-dim: rgba(108, 140, 255, 0.12);
+  --warning-dim: rgba(251, 191, 36, 0.12);
+  --accent: #14b8a6;
+  --accent-dim: rgba(20, 184, 166, 0.1);
   --radius-sm: 8px;
   --radius: 12px;
   --radius-lg: 16px;
@@ -131,19 +131,19 @@ a:hover {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: #2a2e45;
-  border: none;
+  background: var(--accent-dim);
+  border: 2px solid var(--primary);
   display: grid;
   place-items: center;
-  color: var(--text-secondary);
+  color: var(--primary);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .avatar-btn:hover {
-  background: var(--panel-3);
-  color: var(--text);
-  box-shadow: 0 0 0 2px var(--primary-glow);
+  background: var(--primary);
+  color: #0f1117;
+  box-shadow: 0 0 12px rgba(20, 184, 166, 0.2);
 }
 
 .avatar-chevron {
@@ -192,8 +192,8 @@ a:hover {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: var(--panel-3);
-  border: 1px solid var(--border);
+  background: var(--accent-dim);
+  border: 1px solid rgba(20, 184, 166, 0.3);
   display: grid;
   place-items: center;
   color: var(--primary);
@@ -358,14 +358,16 @@ a:hover {
 .btn-primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: #0f1117;
+  font-weight: 700;
   box-shadow: 0 2px 8px var(--primary-glow);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--primary-dark);
   border-color: var(--primary-dark);
-  color: #fff;
+  color: #0f1117;
+  font-weight: 700;
   box-shadow: 0 4px 16px var(--primary-glow);
 }
 
@@ -538,9 +540,9 @@ label {
 
 .badge-preview_ready,
 .badge-ready {
-  color: var(--success);
-  border-color: rgba(52, 211, 153, 0.35);
-  background: var(--success-dim);
+  color: var(--primary);
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.1);
 }
 
 .badge-failed {
@@ -551,8 +553,8 @@ label {
 
 .badge-approved {
   color: var(--primary);
-  border-color: rgba(108, 140, 255, 0.35);
-  background: var(--accent-dim);
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.1);
 }
 
 .badge-draft,
