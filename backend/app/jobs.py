@@ -77,6 +77,7 @@ def builtin_voice_payload(
     narration: Narration,
     speaker: str,
     instruct: str,
+    dialogue_segments: list[dict] | None = None,
 ) -> dict:
     """Payload for a ``custom_voice`` job (Qwen3-TTS CustomVoice).
 
@@ -84,8 +85,12 @@ def builtin_voice_payload(
     single-chunk generation. ``voice_source`` is the explicit discriminator
     that tells the worker and the future voice-clone pipeline apart from a
     narration that uses a user-approved cloned voice.
+
+    When ``dialogue_segments`` is provided, the script contains multi-speaker
+    dialogue and the worker generates each segment with its specific speaker,
+    then concatenates the results with silence gaps between turns.
     """
-    return {
+    payload: dict = {
         "voice_source": "custom_voice",
         "narration_id": narration.id,
         "speaker": speaker,
@@ -93,6 +98,9 @@ def builtin_voice_payload(
         "instruct": instruct,
         "chunks": [narration.script],
     }
+    if dialogue_segments is not None:
+        payload["dialogue_segments"] = dialogue_segments
+    return payload
 
 
 # ---------- enqueue ----------
@@ -230,12 +238,16 @@ def store_artifact(db: Session, job: Job, field: str, data: bytes) -> None:
     elif job.type == "custom_voice" and (
         field == "audio" or (field.startswith("chunk_"))
     ):
-        # Built-in Qwen CustomVoice jobs produce a single WAV (one chunk).
-        # Accept either the descriptive "audio" name OR "chunk_0" (the name
-        # the mock/real worker uses to stay consistent with the narration
-        # upload convention). The file lands at chunk_000 so the existing
-        # concat/serve pipeline handles the artifact identically.
-        storage.write_bytes(storage.narration_chunk_rel(job.narration_id, 0), data)
+        # Built-in Qwen CustomVoice jobs produce either a single WAV (one chunk)
+        # or multiple dialogue segment WAVs (chunk_0, chunk_1, …).
+        # Accept the descriptive "audio" name OR sequential "chunk_N" names.
+        # The file lands at chunk_000 so the existing concat/serve pipeline
+        # handles the artifact identically.
+        try:
+            index = int(field.split("_", 1)[1])
+        except (ValueError, IndexError):
+            index = 0
+        storage.write_bytes(storage.narration_chunk_rel(job.narration_id, index), data)
         job.progress = 99
     else:
         raise ValueError(f"unexpected artifact field for job type {job.type}: {field}")
@@ -293,14 +305,19 @@ def complete_job(
         narration = db.get(Narration, job.narration_id)
         if narration is None:
             raise RuntimeError("narration record missing")
-        # A custom_voice job always produces exactly one WAV (chunk_000).
-        chunk_path = storage.narration_chunk_rel(narration.id, 0)
-        resolved = storage.safe_resolve(chunk_path)
-        if resolved is None:
-            raise RuntimeError("custom voice audio missing")
+        payload = json.loads(job.payload_json)
+        dialogue_segments = payload.get("dialogue_segments")
+        seg_count = len(dialogue_segments) if dialogue_segments else 1
+        chunk_paths = storage.narration_chunk_paths(narration.id, seg_count)
+        existing = [p for p in chunk_paths if p.is_file()]
+        if len(existing) != seg_count:
+            raise RuntimeError(
+                f"expected {seg_count} custom_voice chunk file(s), found {len(existing)}"
+            )
         sr, duration = audio.concat_wav_files(
-            [resolved],
+            existing,
             storage.root() / storage.narration_final_rel(narration.id),
+            silence_ms=300,
         )
 
     _clear_lease(job)

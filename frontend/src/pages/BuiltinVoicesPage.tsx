@@ -6,6 +6,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
 import { SPEAKERS, getSpeaker } from '../customVoices'
 import { formatElapsed } from '../format'
+import { useInsertSpeakerTag } from '../useInsertSpeakerTag'
 
 const LANGUAGES = [
   'Chinese',
@@ -34,6 +35,7 @@ export function BuiltinVoicesPage() {
   const [generatingId, setGeneratingId] = useState<string | null>(null)
   const announcedRef = useRef(false)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const scriptRef = useRef<HTMLTextAreaElement>(null)
 
   const speaker = getSpeaker(selectedSpeaker) ?? SPEAKERS[0]
 
@@ -123,6 +125,8 @@ export function BuiltinVoicesPage() {
     setInstruct((prev) => applyInstructPreset(prev, preset, prev.trim().length > 0))
   }
 
+  const { selectRef: bvSelectRef, handleInsertSpeaker: bvHandleInsertTag } = useInsertSpeakerTag(setScript)
+
   const elapsed =
     result !== null && (result.status === 'queued' || result.status === 'running')
       ? formatElapsed(Date.now() - new Date(result.created_at).getTime())
@@ -195,8 +199,37 @@ export function BuiltinVoicesPage() {
 
               <div className="form-group">
                 <label htmlFor="bv-script">Script *</label>
+                <div className="speaker-tag-row">
+                  <label className="speaker-tag-label" htmlFor="bv-insert-speaker">
+                    Insert speaker
+                  </label>
+                  <select
+                    id="bv-insert-speaker"
+                    ref={bvSelectRef}
+                    className="input speaker-tag-select"
+                    defaultValue=""
+                  >
+                    <option value="" disabled>Choose speaker…</option>
+                    {SPEAKERS.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      const ta = scriptRef.current
+                      if (ta) bvHandleInsertTag(ta)
+                    }}
+                  >
+                    Insert
+                  </button>
+                </div>
                 <textarea
                   id="bv-script"
+                  ref={scriptRef}
                   value={script}
                   onChange={(e) => setScript(e.target.value)}
                   placeholder="Enter the text you want to narrate…"

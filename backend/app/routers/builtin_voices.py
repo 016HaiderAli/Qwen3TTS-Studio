@@ -8,6 +8,7 @@ from .. import jobs as job_service
 from ..custom_voices import get_speaker, is_known_speaker, list_speakers
 from ..db import get_db
 from ..deps import get_current_user
+from ..dialogue import DialogueSegment, parse_dialogue_script
 from ..models import Narration, User
 from ..schemas import (
     BuiltinVoiceGenerateRequest,
@@ -25,6 +26,30 @@ def list_builtin_voices():
     return [BuiltinVoiceInfo(id=s.id, description=s.description, native_language=s.native_language) for s in list_speakers()]
 
 
+def _validate_dialogue_segments(
+    segments: list[DialogueSegmentPayload],
+) -> list[DialogueSegment]:
+    """Validate and normalise dialogue segments from an API payload."""
+    result: list[DialogueSegment] = []
+    for seg in segments:
+        speaker = seg.speaker.strip()
+        if not speaker:
+            raise HTTPException(status_code=400, detail="Each dialogue segment must have a non-empty speaker name.")
+        if not is_known_speaker(speaker):
+            raise HTTPException(status_code=400, detail=f"Unknown speaker in dialogue: {speaker!r}")
+        text = seg.text.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Each dialogue segment must have non-empty text.")
+        result.append(
+            DialogueSegment(
+                speaker=speaker,
+                text=text,
+                segment_instruct=seg.instruct.strip(),
+            )
+        )
+    return result
+
+
 @router.post("/generate", response_model=NarrationResponse, status_code=status.HTTP_201_CREATED)
 def generate_builtin_voice(
     body: BuiltinVoiceGenerateRequest,
@@ -35,20 +60,51 @@ def generate_builtin_voice(
         raise HTTPException(status_code=400, detail=f"Unknown speaker: {body.speaker!r}")
 
     speaker_info = get_speaker(body.speaker)
+    instruct = body.instruct.strip()
+    dialogue_segments: list[dict] | None = None
 
-    script = body.script.strip()
-    if not script:
-        raise HTTPException(status_code=422, detail="Script cannot be empty.")
+    if body.dialogue_segments is not None:
+        validated = _validate_dialogue_segments(body.dialogue_segments)
+        script = " | ".join(f"[{s.speaker}] {s.text}" for s in validated)
+        dialogue_segments = [
+            {"speaker": s.speaker, "text": s.text, "instruct": s.segment_instruct}
+            for s in validated
+        ]
+    else:
+        script = body.script.strip()
+        if not script:
+            raise HTTPException(status_code=422, detail="Script cannot be empty.")
+        parsed = parse_dialogue_script(script, body.speaker)
+        if len(parsed) > 1:
+            validated_segments = [
+                s for s in parsed if is_known_speaker(s.speaker)
+            ]
+            merged: list[DialogueSegment] = []
+            for s in validated_segments:
+                if merged and merged[-1].speaker == s.speaker and not merged[-1].segment_instruct and not s.segment_instruct:
+                    merged[-1] = DialogueSegment(
+                        speaker=s.speaker,
+                        text=f"{merged[-1].text} {s.text}",
+                        segment_instruct="",
+                    )
+                else:
+                    merged.append(s)
+            if len(merged) > 1:
+                script = " | ".join(f"[{s.speaker}] {s.text}" for s in merged)
+                dialogue_segments = [
+                    {"speaker": s.speaker, "text": s.text, "instruct": s.segment_instruct}
+                    for s in merged
+                ]
 
     narration = Narration(
         owner_id=user.id,
         voice_id=get_builtin_voice_id(),
         title=body.title.strip() or f"Built-in: {speaker_info.id}",
         script=script,
-        delivery_direction=body.instruct.strip(),
+        delivery_direction=instruct,
         language=body.language,
         status="queued",
-        chunks_json=json.dumps([script]),
+        chunks_json=json.dumps([s["text"] for s in dialogue_segments]) if dialogue_segments else json.dumps([script]),
         chunk_durations_json="[]",
     )
     db.add(narration)
@@ -57,7 +113,8 @@ def generate_builtin_voice(
     payload = job_service.builtin_voice_payload(
         narration,
         speaker=body.speaker,
-        instruct=body.instruct,
+        instruct=instruct,
+        dialogue_segments=dialogue_segments,
     )
     job_service.enqueue(
         db,
@@ -77,7 +134,7 @@ def generate_builtin_voice(
         language=narration.language,
         status=narration.status,
         voice_source="custom_voice",
-        chunk_count=1,
+        chunk_count=len(dialogue_segments) if dialogue_segments else 1,
         chunks_done=0,
         duration_sec=None,
         sample_rate=None,

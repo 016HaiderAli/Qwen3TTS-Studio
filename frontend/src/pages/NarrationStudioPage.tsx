@@ -6,6 +6,7 @@ import { ProgressBar } from '../components/ProgressBar'
 import { StatusBadge } from '../components/StatusBadge'
 import { EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
 import { formatElapsed } from '../format'
+import { useInsertSpeakerTag } from '../useInsertSpeakerTag'
 
 const LANGUAGES = [
   'Chinese',
@@ -46,6 +47,7 @@ export function NarrationStudioPage() {
   const announcedRef = useRef<Set<string>>(new Set())
   const scrolledRef = useRef<Set<string>>(new Set())
   const pollRef = useRef<number | null>(null)
+  const scriptRef = useRef<HTMLTextAreaElement>(null)
 
   // Loads the approved voices and (optionally) the narration to reuse, then
   // preselects a voice. Re-runs whenever the ?voice= / ?reuse= params change
@@ -117,6 +119,8 @@ export function NarrationStudioPage() {
     const preset = EXPRESSIVE_PRESETS[presetIdx]
     setDelivery((prev) => applyInstructPreset(prev, preset, prev.trim().length > 0))
   }
+
+  const { selectRef: nsSelectRef, handleInsertSpeaker: nsHandleInsertTag } = useInsertSpeakerTag(setScript)
 
   const announceOnce = useCallback((id: string, status: string, message: string) => {
     const key = `${id}:${status}`
@@ -270,11 +274,42 @@ export function NarrationStudioPage() {
               disabled={formDisabled}
             />
           </label>
+          <div className="speaker-tag-row">
+            <label className="speaker-tag-label" htmlFor="ns-insert-speaker">
+              Insert speaker
+            </label>
+            <select
+              id="ns-insert-speaker"
+              ref={nsSelectRef}
+              className="input speaker-tag-select"
+              defaultValue=""
+            >
+              <option value="" disabled>Choose voice…</option>
+              {voices
+                .filter((v) => v.has_approved_prompt)
+                .map((v) => (
+                  <option key={v.id} value={v.name}>
+                    {v.name}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                const ta = scriptRef.current
+                if (ta) nsHandleInsertTag(ta)
+              }}
+            >
+              Insert
+            </button>
+          </div>
           <label>
             Script
             <textarea
               className="input"
               rows={12}
+              ref={scriptRef}
               value={script}
               onChange={(e) => setScript(e.target.value)}
               required

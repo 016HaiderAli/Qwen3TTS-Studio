@@ -132,19 +132,22 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
         speaker = payload.get("speaker") or ""
         language = payload.get("language") or "English"
         instruct = payload.get("instruct") or ""
+        dialogue_segments = payload.get("dialogue_segments")
+        seg_count = len(dialogue_segments) if dialogue_segments else len(chunks)
         logger.info(
-            "custom_voice job %s: speaker=%s language=%s instruct=%r chunks=%d",
-            job_id, speaker, language, instruct, len(chunks),
+            "custom_voice job %s: speaker=%s language=%s instruct=%r segments=%d",
+            job_id, speaker, language, instruct, seg_count,
         )
         outputs = backend.generate_custom_voice(
             chunks=chunks,
             speaker=speaker,
             language=language,
             instruct=instruct,
+            dialogue_segments=dialogue_segments,
         )
-        if len(outputs) != len(chunks):
+        if len(outputs) != seg_count:
             raise RuntimeError(
-                f"expected {len(chunks)} outputs, got {len(outputs)}"
+                f"expected {seg_count} outputs, got {len(outputs)}"
             )
         sample_rate = outputs[0].sample_rate
         durations = [o.duration_sec for o in outputs]

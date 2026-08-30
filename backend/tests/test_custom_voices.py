@@ -269,3 +269,153 @@ def test_custom_voice_audio_download(client, dev_login):
     )
     assert dl_resp.status_code == 200
     assert "attachment" in dl_resp.headers.get("Content-Disposition", "")
+
+
+# ---------------------------------------------------------------------------
+# Multi-speaker dialogue narration
+# ---------------------------------------------------------------------------
+
+
+def _run_dialogue_worker(client, mock: MockBackend, max_jobs: int = 5) -> int:
+    """Poll and process dialogue custom_voice jobs until idle. Returns number processed."""
+    processed = 0
+    for _ in range(max_jobs):
+        resp = client.post("/internal/jobs/poll", headers=WORKER_AUTH)
+        if resp.status_code == 204:
+            break
+        assert resp.status_code == 200
+        claim = resp.json()
+        assert claim["type"] == "custom_voice"
+        processed += 1
+
+        payload = claim["payload"]
+        outputs = mock.generate_custom_voice(
+            chunks=payload["chunks"],
+            speaker=payload["speaker"],
+            language=payload["language"],
+            instruct=payload["instruct"],
+            dialogue_segments=payload.get("dialogue_segments"),
+        )
+        seg_count = len(payload.get("dialogue_segments") or payload["chunks"])
+        assert len(outputs) == seg_count
+        for i, out in enumerate(outputs):
+            _upload(client, claim, f"chunk_{i}", out.wav_bytes)
+        _complete(
+            client,
+            claim,
+            outputs[0].sample_rate,
+            [o.duration_sec for o in outputs],
+        )
+    return processed
+
+
+def test_dialogue_segments_two_speakers(client, dev_login):
+    """Explicit dialogue_segments with two speakers generates and concatenates correctly."""
+    dev_login("dialogue1@example.com")
+    resp = client.post(
+        "/api/builtin-voices/generate",
+        json={
+            "speaker": "Ryan",
+            "language": "English",
+            "dialogue_segments": [
+                {"speaker": "Ryan", "text": "Hey, are you coming to the party tonight?"},
+                {"speaker": "Serena", "text": "I wouldn't miss it for the world!"},
+            ],
+            "title": "Dialogue test",
+        },
+    )
+    assert resp.status_code == 201
+    narration = resp.json()
+    assert narration["id"]
+    assert narration["status"] == "queued"
+    assert narration["chunk_count"] == 2
+    assert narration["voice_source"] == "custom_voice"
+
+    # Worker processes both segments.
+    assert _run_dialogue_worker(client, MockBackend()) == 1
+
+    # Narration is ready.
+    narration = client.get(f"/api/narrations/{narration['id']}").json()
+    assert narration["status"] == "ready"
+    assert narration["sample_rate"] == 24000
+
+    # Audio file is served and is a valid WAV.
+    audio = client.get(f"/api/files/narrations/{narration['id']}/audio")
+    assert audio.status_code == 200
+    assert audio.content[:4] == b"RIFF"
+
+
+def test_dialogue_segments_rejects_unknown_speaker(client, dev_login):
+    """A dialogue segment naming an unknown speaker returns 400."""
+    dev_login("dialogue2@example.com")
+    resp = client.post(
+        "/api/builtin-voices/generate",
+        json={
+            "speaker": "Ryan",
+            "language": "English",
+            "dialogue_segments": [
+                {"speaker": "Ryan", "text": "Hello."},
+                {"speaker": "FakeSpeaker", "text": "Not a real speaker."},
+            ],
+        },
+    )
+    assert resp.status_code == 400
+    assert "Unknown speaker" in resp.json()["detail"]
+
+
+def test_dialogue_segments_rejects_empty_text(client, dev_login):
+    """A dialogue segment with empty text returns 400."""
+    dev_login("dialogue3@example.com")
+    resp = client.post(
+        "/api/builtin-voices/generate",
+        json={
+            "speaker": "Ryan",
+            "language": "English",
+            "dialogue_segments": [
+                {"speaker": "Ryan", "text": "Hello."},
+                {"speaker": "Serena", "text": "   "},
+            ],
+        },
+    )
+    assert resp.status_code == 400
+    assert "non-empty text" in resp.json()["detail"]
+
+
+def test_dialogue_auto_detected_from_inline_tags(client, dev_login):
+    """Inline [Speaker: ...] tags in the script trigger dialogue mode automatically."""
+    dev_login("dialogue4@example.com")
+    resp = client.post(
+        "/api/builtin-voices/generate",
+        json={
+            "speaker": "Ryan",
+            "language": "English",
+            "script": "Hello there! [Speaker: Serena] Hi! How are you doing? [Speaker: Ryan] Great, thanks!",
+        },
+    )
+    assert resp.status_code == 201
+    narration = resp.json()
+    assert narration["status"] == "queued"
+
+    # Job payload should contain dialogue_segments.
+    resp2 = client.post("/internal/jobs/poll", headers=WORKER_AUTH)
+    assert resp2.status_code == 200
+    claim = resp2.json()
+    assert "dialogue_segments" in claim["payload"]
+    segs = claim["payload"]["dialogue_segments"]
+    assert len(segs) == 3
+
+    # Complete the job.
+    outputs = MockBackend().generate_custom_voice(
+        chunks=claim["payload"]["chunks"],
+        speaker=claim["payload"]["speaker"],
+        language=claim["payload"]["language"],
+        instruct=claim["payload"]["instruct"],
+        dialogue_segments=segs,
+    )
+    for i, out in enumerate(outputs):
+        _upload(client, claim, f"chunk_{i}", out.wav_bytes)
+    _complete(client, claim, outputs[0].sample_rate, [o.duration_sec for o in outputs])
+
+    narration = client.get(f"/api/narrations/{narration['id']}").json()
+    assert narration["status"] == "ready"
+    assert narration["chunk_count"] == 3

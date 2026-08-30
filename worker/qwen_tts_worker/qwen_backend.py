@@ -241,26 +241,50 @@ class QwenBackend(InferenceBackend):
         speaker: str,
         language: str,
         instruct: str,
+        dialogue_segments: list[dict] | None = None,
     ) -> list[SynthesisOutput]:
         import torch
 
         model = self._load_custom_voice()
         outputs: list[SynthesisOutput] = []
-        for i, chunk in enumerate(chunks):
-            logger.info(
-                "custom_voice job: speaker=%s chunk %d/%d",
-                speaker, i + 1, len(chunks),
-            )
-            with torch.inference_mode():
-                wavs, sr = model.generate_custom_voice(
-                    text=chunk,
-                    language=language,
-                    speaker=speaker,
-                    instruct=instruct if instruct.strip() else None,
+
+        if dialogue_segments:
+            for i, seg in enumerate(dialogue_segments):
+                seg_speaker = seg.get("speaker", speaker)
+                seg_text = seg.get("text", "")
+                seg_instruct = seg.get("instruct", "")
+                logger.info(
+                    "dialogue segment %d: speaker=%s instruct=%r text=%r",
+                    i + 1, seg_speaker, seg_instruct, seg_text[:80],
                 )
-            data = _wav_bytes(wavs[0], sr)
-            duration = len(wavs[0]) / sr
-            outputs.append(
-                SynthesisOutput(data, int(sr), round(float(duration), 3))
-            )
+                with torch.inference_mode():
+                    wavs, sr = model.generate_custom_voice(
+                        text=seg_text,
+                        language=language,
+                        speaker=seg_speaker,
+                        instruct=seg_instruct if seg_instruct.strip() else None,
+                    )
+                data = _wav_bytes(wavs[0], sr)
+                duration = len(wavs[0]) / sr
+                outputs.append(
+                    SynthesisOutput(data, int(sr), round(float(duration), 3))
+                )
+        else:
+            for i, chunk in enumerate(chunks):
+                logger.info(
+                    "custom_voice job: speaker=%s chunk %d/%d",
+                    speaker, i + 1, len(chunks),
+                )
+                with torch.inference_mode():
+                    wavs, sr = model.generate_custom_voice(
+                        text=chunk,
+                        language=language,
+                        speaker=speaker,
+                        instruct=instruct if instruct.strip() else None,
+                    )
+                data = _wav_bytes(wavs[0], sr)
+                duration = len(wavs[0]) / sr
+                outputs.append(
+                    SynthesisOutput(data, int(sr), round(float(duration), 3))
+                )
         return outputs

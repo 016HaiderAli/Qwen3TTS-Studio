@@ -53,8 +53,9 @@ class InferenceBackend(ABC):
         speaker: str,
         language: str,
         instruct: str,
+        dialogue_segments: list[dict] | None = None,
     ) -> list[SynthesisOutput]:
-        """Generate one WAV per chunk using a Qwen CustomVoice speaker."""
+        """Generate one WAV per chunk (single-speaker) or per segment (dialogue)."""
 
 
 def _hash_int(*parts: str) -> int:
@@ -137,12 +138,26 @@ class MockBackend(InferenceBackend):
         speaker: str,
         language: str,
         instruct: str,
+        dialogue_segments: list[dict] | None = None,
     ) -> list[SynthesisOutput]:
         outputs = []
-        for i, chunk in enumerate(chunks):
-            seed = _hash_int("custom_voice", speaker, str(i), chunk, instruct, language)
-            base_dur = 1.2 + (len(chunk.split()) / 80.0) * 2.4
-            if "\n\n" in chunk:
-                base_dur += 0.4
-            outputs.append(self._tone(seed, base_dur, base_freq=180.0 + i * 15))
+        if dialogue_segments:
+            for i, seg in enumerate(dialogue_segments):
+                seg_speaker = seg.get("speaker", speaker)
+                seg_text = seg.get("text", "")
+                seg_instruct = seg.get("instruct", "")
+                seed = _hash_int(
+                    "dialogue", seg_speaker, str(i), seg_text, seg_instruct, language,
+                )
+                base_dur = 1.2 + (len(seg_text.split()) / 80.0) * 2.4
+                if "\n\n" in seg_text:
+                    base_dur += 0.4
+                outputs.append(self._tone(seed, base_dur, base_freq=180.0 + i * 15))
+        else:
+            for i, chunk in enumerate(chunks):
+                seed = _hash_int("custom_voice", speaker, str(i), chunk, instruct, language)
+                base_dur = 1.2 + (len(chunk.split()) / 80.0) * 2.4
+                if "\n\n" in chunk:
+                    base_dur += 0.4
+                outputs.append(self._tone(seed, base_dur, base_freq=180.0 + i * 15))
         return outputs

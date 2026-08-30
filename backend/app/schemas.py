@@ -121,15 +121,26 @@ class BuiltinVoiceInfo(BaseModel):
     native_language: str
 
 
+class DialogueSegmentPayload(BaseModel):
+    speaker: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=10_000)
+    instruct: str = Field(default="", max_length=500)
+
+
 class BuiltinVoiceGenerateRequest(BaseModel):
     speaker: str = Field(min_length=1, max_length=64)
     language: str = Field(default="English", max_length=50)
-    script: str = Field(min_length=1, max_length=100_000)
+    script: str = Field(default="")
     # Natural-language delivery direction. Optional for CustomVoice (the
     # model's `instruct` parameter); an empty string is forwarded as
     # ``instruct=None`` to the model.
     instruct: str = Field(default="", max_length=2_000)
     title: str = Field(default="", max_length=300)
+    # Multi-speaker dialogue segments. When provided, ``script`` is ignored and
+    # the job processes each segment independently (per-speaker TTS generation).
+    dialogue_segments: list[DialogueSegmentPayload] | None = Field(
+        default=None, max_length=50
+    )
 
 
 # ---------- Internal worker API ----------
