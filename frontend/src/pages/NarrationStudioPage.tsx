@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { Wand2 } from 'lucide-react'
 import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { ProgressBar } from '../components/ProgressBar'
@@ -23,6 +24,35 @@ const LANGUAGES = [
 
 const MAX_SCRIPT_CHARS = 100_000
 const ESTIMATED_WORDS_PER_MINUTE = 150
+
+function VoiceCard({
+  voice,
+  selected,
+  onSelect,
+}: {
+  voice: Voice
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`voice-card ${selected ? 'selected' : ''}`}
+      onClick={onSelect}
+      aria-pressed={selected}
+    >
+      <div className="voice-card-head">
+        <h3>{`${voice.name} (${voice.language})`}</h3>
+        {selected ? null : <StatusBadge status={voice.status} />}
+      </div>
+      {selected || voice.status !== 'approved' ? null : (
+        <p className="muted" style={{ fontSize: '0.78rem' }}>
+          {voice.language} · {voice.description || 'No description'}
+        </p>
+      )}
+    </button>
+  )
+}
 
 export function NarrationStudioPage() {
   const [params] = useSearchParams()
@@ -49,9 +79,6 @@ export function NarrationStudioPage() {
   const pollRef = useRef<number | null>(null)
   const scriptRef = useRef<HTMLTextAreaElement>(null)
 
-  // Loads the approved voices and (optionally) the narration to reuse, then
-  // preselects a voice. Re-runs whenever the ?voice= / ?reuse= params change
-  // and can be triggered again from the load-error Retry action.
   const load = useCallback(async () => {
     const selectVoice = (rows: Voice[], preferred?: string | null) => {
       const approved = rows.filter((v) => v.has_approved_prompt)
@@ -136,8 +163,6 @@ export function NarrationStudioPage() {
     statusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [])
 
-  // Poll the narration until it reaches a terminal state, announcing and
-  // scrolling exactly once when it finishes.
   useEffect(() => {
     const id = narration?.id
     const status = narration?.status
@@ -157,10 +182,7 @@ export function NarrationStudioPage() {
       void api
         .getNarration(id)
         .then((n) => setNarration(n))
-        .catch(() => {
-          // Transient polling failure: keep the last known state and retry on
-          // the next tick.
-        })
+        .catch(() => {})
     }, 2000)
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current)
@@ -199,12 +221,10 @@ export function NarrationStudioPage() {
     : null
 
   const selectedVoice = voices.find((v) => v.id === voiceId && v.has_approved_prompt) ?? null
-  const approvedCount = voices.filter((v) => v.has_approved_prompt).length
+  const approvedVoices = voices.filter((v) => v.has_approved_prompt)
   const words = script.trim() ? script.trim().split(/\s+/).length : 0
   const charCount = script.length
   const overCharLimit = charCount > MAX_SCRIPT_CHARS
-  // Rough heuristic (~150 wpm). Clearly labeled as an estimate in the UI and
-  // replaced by the measured duration once generation completes.
   const estimateSec = words > 0 ? Math.round((words / ESTIMATED_WORDS_PER_MINUTE) * 60) : 0
   const showEstimate = !narration && !active && words > 0
 
@@ -225,7 +245,7 @@ export function NarrationStudioPage() {
         </div>
       )}
       {error && (
-        <p className="error-banner" role="alert">
+        <p className="error-banner" role="alert" style={{ marginBottom: '1rem' }}>
           {error}
         </p>
       )}
@@ -238,85 +258,114 @@ export function NarrationStudioPage() {
             void generate()
           }}
         >
-          <label>
-            Voice
-            <select
-              className="input"
-              value={voiceId}
-              onChange={(e) => {
-                const id = e.target.value
-                setVoiceId(id)
-                const picked = voices.find((v) => v.id === id && v.has_approved_prompt)
-                if (picked && !languageTouchedRef.current) setLanguage(picked.language)
-              }}
-              disabled={loadingVoices || formDisabled}
-              required
-            >
-              {!loadingVoices && !loadError && approvedCount === 0 && (
-                <option value="">No approved voices yet</option>
-              )}
-              {voices
-                .filter((v) => v.has_approved_prompt)
-                .map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name} ({v.language})
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label>
-            Title
+          <div className="form-group">
+            <label htmlFor="ns-voice-select">Voice</label>
+            {loadingVoices ? (
+              <p className="muted" style={{ fontSize: '0.85rem' }}>Loading voices…</p>
+            ) : approvedVoices.length === 0 ? (
+              <>
+                <select
+                  id="ns-voice-select"
+                  className="sr-only"
+                  value={voiceId}
+                  onChange={(e) => {
+                    setVoiceId(e.target.value)
+                    const v = voices.find((x) => x.id === e.target.value)
+                    if (v && !languageTouchedRef.current) setLanguage(v.language)
+                  }}
+                  aria-label="Select voice"
+                >
+                  <option value="" />
+                </select>
+                <p className="muted" style={{ fontSize: '0.85rem' }}>No approved voices yet.</p>
+              </>
+            ) : (
+              <>
+                <select
+                  id="ns-voice-select"
+                  className="sr-only"
+                  value={voiceId}
+                  onChange={(e) => {
+                    setVoiceId(e.target.value)
+                    const v = voices.find((x) => x.id === e.target.value)
+                    if (v && !languageTouchedRef.current) setLanguage(v.language)
+                  }}
+                  aria-label="Select voice"
+                >
+                  {approvedVoices.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+                <ul className="speaker-grid" role="list" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+                  {approvedVoices.map((v) => (
+                    <li key={v.id}>
+                      <VoiceCard
+                        voice={v}
+                        selected={voiceId === v.id}
+                        onSelect={() => {
+                          setVoiceId(v.id)
+                          if (!languageTouchedRef.current) setLanguage(v.language)
+                        }}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="ns-title">Title</label>
             <input
+              id="ns-title"
               className="input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Untitled narration"
               disabled={formDisabled}
             />
-          </label>
-          <div className="speaker-tag-row">
-            <label className="speaker-tag-label" htmlFor="ns-insert-speaker">
-              Insert speaker
-            </label>
-            <select
-              id="ns-insert-speaker"
-              ref={nsSelectRef}
-              className="input speaker-tag-select"
-              defaultValue=""
-            >
-              <option value="" disabled>Choose voice…</option>
-              {voices
-                .filter((v) => v.has_approved_prompt)
-                .map((v) => (
-                  <option key={v.id} value={v.name}>
-                    {v.name}
-                  </option>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="ns-script">Script</label>
+
+            <div className="dialogue-toolbar">
+              <span className="dialogue-toolbar-label">
+                <Wand2 size={12} strokeWidth={2.5} style={{ display: 'inline', marginRight: 4 }} />
+                Speaker tag
+              </span>
+              <select
+                id="ns-insert-speaker"
+                ref={nsSelectRef}
+                defaultValue=""
+                aria-label="Insert speaker tag"
+              >
+                <option value="" disabled>Choose voice…</option>
+                {approvedVoices.map((v) => (
+                  <option key={v.id} value={v.name}>{v.name}</option>
                 ))}
-            </select>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                const ta = scriptRef.current
-                if (ta) nsHandleInsertTag(ta)
-              }}
-            >
-              Insert
-            </button>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button
-              type="button"
-              className="btn"
-              style={{ fontSize: '0.8rem' }}
-              onClick={() => setScript(DEMO_DIALOGUE_SCRIPT)}
-            >
-              Load demo dialogue
-            </button>
-          </div>
-          <label>
-            Script
+              </select>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  const ta = scriptRef.current
+                  if (ta) nsHandleInsertTag(ta)
+                }}
+              >
+                Insert
+              </button>
+              <button
+                type="button"
+                className="demo-btn"
+                onClick={() => setScript(DEMO_DIALOGUE_SCRIPT)}
+              >
+                Load demo dialogue
+              </button>
+            </div>
+
             <textarea
+              id="ns-script"
               className="input"
               rows={12}
               ref={scriptRef}
@@ -326,33 +375,35 @@ export function NarrationStudioPage() {
               placeholder="Paste the script to narrate. Separate paragraphs with a blank line — paragraph pauses are preserved."
               disabled={formDisabled}
             />
-          </label>
-          <span className="muted script-meta">
-            <span className={overCharLimit ? 'char-limit-warn' : undefined}>
-              {charCount.toLocaleString()} / {MAX_SCRIPT_CHARS.toLocaleString()} characters
-            </span>
-            <span>· {words} words</span>
-            {showEstimate && (
-              <span className="duration-estimate">
-                · ~{formatElapsed(estimateSec * 1000)} estimated at ~150 words/min
+            <span className="script-meta">
+              <span className={overCharLimit ? 'char-limit-warn' : 'muted'}>
+                {`${charCount.toLocaleString()} / 100,000 characters`}
               </span>
-            )}
-          </span>
-          <div className="preset-chips" role="group" aria-label="Expressive presets">
-            {EXPRESSIVE_PRESETS.map((p, i) => (
-              <button
-                key={p.label}
-                type="button"
-                className="preset-chip"
-                onClick={() => handlePreset(i)}
-              >
-                {p.label}
-              </button>
-            ))}
+              <span className="muted"> · {words} words</span>
+              {showEstimate && (
+                <span className="duration-estimate">
+                  {' · '}~{formatElapsed(estimateSec * 1000)} estimated at ~150 words/min
+                </span>
+              )}
+            </span>
           </div>
-          <label>
-            Delivery / voice direction
+
+          <div className="form-group">
+            <label htmlFor="ns-delivery">Delivery / voice direction</label>
+            <div className="preset-chips" role="group" aria-label="Expressive presets">
+              {EXPRESSIVE_PRESETS.map((p, i) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  className="preset-chip"
+                  onClick={() => handlePreset(i)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
             <textarea
+              id="ns-delivery"
               className="input"
               rows={2}
               value={delivery}
@@ -360,10 +411,12 @@ export function NarrationStudioPage() {
               placeholder='Optional: e.g. "Speak slowly and warmly, pause briefly after each sentence."'
               disabled={formDisabled}
             />
-          </label>
-          <label>
-            Language
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="ns-language">Language</label>
             <select
+              id="ns-language"
               className="input"
               value={language}
               onChange={(e) => {
@@ -376,7 +429,8 @@ export function NarrationStudioPage() {
                 <option key={lang}>{lang}</option>
               ))}
             </select>
-          </label>
+          </div>
+
           <button
             className="btn btn-primary btn-block"
             disabled={busy || active || !script.trim() || !voiceId}
@@ -391,7 +445,7 @@ export function NarrationStudioPage() {
               <h3>Selected voice</h3>
               {selectedVoice.status === 'approved' ? (
                 <>
-                  <p className="muted">
+                  <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
                     {selectedVoice.name} · {selectedVoice.language}
                     {selectedVoice.description ? ` — ${selectedVoice.description}` : ''}
                   </p>
@@ -399,54 +453,57 @@ export function NarrationStudioPage() {
                 </>
               ) : (
                 <>
-                  <p className="muted voice-current-callout">
-                    This is your current approved voice. It stays usable for narration while a new
-                    version is being designed; the redesign is a replacement candidate.
+                  <p className="voice-current-callout" style={{ marginBottom: '0.5rem' }}>
+                    This is your current approved voice. It stays usable for narration while a new version is being designed.
                   </p>
                   <StatusBadge status={selectedVoice.status} />
                 </>
               )}
-              <AudioPlayer
-                src={`/api/files/voices/${selectedVoice.id}/reference`}
-                title={`${selectedVoice.name} current approved voice`}
-              />
+              <div style={{ marginTop: '0.75rem' }}>
+                <AudioPlayer
+                  src={`/api/files/voices/${selectedVoice.id}/reference`}
+                  title={`${selectedVoice.name} current approved voice`}
+                />
+              </div>
             </div>
           )}
-          {!loadingVoices && !loadError && approvedCount === 0 && (
+
+          {!loadingVoices && !loadError && approvedVoices.length === 0 && (
             <div className="panel">
               <h3>No approved voices yet</h3>
-              <p className="muted">
-                You need at least one approved voice before you can narrate. Design and approve a
-                voice first.
+              <p className="muted" style={{ fontSize: '0.85rem' }}>
+                You need at least one approved voice before you can narrate. Design and approve a voice first.
               </p>
-              <Link to="/voices" className="btn btn-primary">
+              <Link to="/voices" className="btn btn-primary" style={{ marginTop: '0.75rem', display: 'inline-flex' }}>
                 Go to voice library
               </Link>
             </div>
           )}
+
           {active && narration && (
             <div className="panel">
               <h3>Generating</h3>
               {narration.status === 'queued' ? (
-                <p className="muted">
+                <p className="muted" style={{ fontSize: '0.85rem' }}>
                   Waiting for the GPU worker to pick up your narration…
                   {elapsed ? ` ${elapsed} elapsed` : ''}
                 </p>
               ) : (
                 <>
-                  <p className="muted">
+                  <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
                     Chunk {narration.chunks_done} of {narration.chunk_count}
-                    {elapsed ? ` · ${elapsed} elapsed` : ''}
+                    {elapsed ? ` · ${elapsed}` : ''}
                   </p>
                   <ProgressBar value={progress} />
                 </>
               )}
             </div>
           )}
+
           {narration?.status === 'ready' && (
             <div className="panel success-panel success-highlight">
               <h3>Ready</h3>
-              <p className="muted">
+              <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
                 {narration.chunk_count} chunk{narration.chunk_count === 1 ? '' : 's'} ·{' '}
                 {narration.duration_sec != null
                   ? `${narration.duration_sec.toFixed(1)} s`
@@ -459,17 +516,22 @@ export function NarrationStudioPage() {
               <a
                 className="btn btn-primary"
                 href={`/api/files/narrations/${narration.id}/audio?download=true`}
+                style={{ marginTop: '0.75rem', display: 'inline-flex' }}
               >
                 Download WAV
               </a>
             </div>
           )}
+
           {narration?.status === 'failed' && (
             <div className="panel error-panel">
               <h3>Generation failed</h3>
-              <p className="muted">{narration.error ?? 'Unknown error.'}</p>
+              <p className="muted" style={{ fontSize: '0.85rem' }}>
+                {narration.error ?? 'Unknown error.'}
+              </p>
               <button
                 className="btn btn-primary"
+                style={{ marginTop: '0.75rem' }}
                 onClick={() => void generate()}
                 disabled={busy}
               >
@@ -477,16 +539,17 @@ export function NarrationStudioPage() {
               </button>
             </div>
           )}
-          {!active && !narration && approvedCount > 0 && (
+
+          {!active && !narration && approvedVoices.length > 0 && (
             <div className="panel">
               <h3>How it works</h3>
-              <ol className="muted">
+              <ol style={{ paddingLeft: '1.2rem', display: 'grid', gap: '0.4rem', color: 'var(--muted)', fontSize: '0.875rem' }}>
                 <li>Pick a voice that has an approved version.</li>
                 <li>Paste your script.</li>
                 <li>Optionally add delivery direction.</li>
                 <li>Generate and listen.</li>
               </ol>
-              <Link to="/voices" className="btn btn-ghost">
+              <Link to="/voices" className="btn btn-ghost" style={{ marginTop: '0.75rem', display: 'inline-flex' }}>
                 Manage voices
               </Link>
             </div>

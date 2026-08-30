@@ -1,3 +1,4 @@
+import { Download, Pause, Play, Volume2, VolumeX } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 
 function formatTime(seconds: number | null): string {
@@ -10,46 +11,6 @@ function formatTime(seconds: number | null): string {
 
 function downloadUrl(src: string): string {
   return src.includes('?') ? `${src}&download=true` : `${src}?download=true`
-}
-
-function PlayIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  )
-}
-
-function PauseIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M6 5h4v14H6zm8 0h4v14h-4z" />
-    </svg>
-  )
-}
-
-function VolumeIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12z" />
-    </svg>
-  )
-}
-
-function MutedIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.919 8.919 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z" />
-    </svg>
-  )
-}
-
-function DownloadIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" />
-    </svg>
-  )
 }
 
 export function AudioPlayer({ src, title }: { src: string; title?: string }) {
@@ -146,7 +107,10 @@ export function AudioPlayer({ src, title }: { src: string; title?: string }) {
   const enabled = ready && !failed
   const max = enabled ? (duration ?? 0) : 0
   const value = enabled && duration ? Math.min(currentTime, duration) : 0
-  const pct = enabled && duration && duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0
+  const pct =
+    enabled && duration && duration > 0
+      ? Math.min(100, (currentTime / duration) * 100)
+      : 0
 
   return (
     <div className="audio-player" role="group" aria-label={`Audio player: ${label}`}>
@@ -154,12 +118,13 @@ export function AudioPlayer({ src, title }: { src: string; title?: string }) {
       <div className="audio-player-main">
         <button
           type="button"
-          className="audio-play"
+          className="audio-icon-btn"
           onClick={() => void togglePlay()}
           disabled={!enabled}
           aria-label={playing ? 'Pause' : 'Play'}
+          title={playing ? 'Pause' : 'Play'}
         >
-          {playing ? <PauseIcon /> : <PlayIcon />}
+          {playing ? <Pause size={14} strokeWidth={2.5} /> : <Play size={14} strokeWidth={2.5} />}
         </button>
         <input
           type="range"
@@ -172,7 +137,9 @@ export function AudioPlayer({ src, title }: { src: string; title?: string }) {
           disabled={!enabled}
           style={{ '--audio-fill': `${pct}%` } as CSSProperties}
           aria-label="Seek"
-          aria-valuetext={enabled ? `${formatTime(currentTime)} of ${formatTime(duration)}` : undefined}
+          aria-valuetext={
+            enabled ? `${formatTime(currentTime)} of ${formatTime(duration)}` : undefined
+          }
         />
         <span className="audio-time" aria-hidden="true">
           {enabled ? `${formatTime(currentTime)} / ${formatTime(duration)}` : '--:-- / --:--'}
@@ -180,12 +147,17 @@ export function AudioPlayer({ src, title }: { src: string; title?: string }) {
         <div className="audio-volume">
           <button
             type="button"
-            className="audio-mute"
+            className="audio-icon-btn"
             onClick={toggleMute}
             disabled={!enabled}
             aria-label={muted ? 'Unmute' : 'Mute'}
+            title={muted ? 'Unmute' : 'Mute'}
           >
-            {muted ? <MutedIcon /> : <VolumeIcon />}
+            {muted ? (
+              <VolumeX size={14} strokeWidth={2} />
+            ) : (
+              <Volume2 size={14} strokeWidth={2} />
+            )}
           </button>
           <input
             type="range"
@@ -199,13 +171,13 @@ export function AudioPlayer({ src, title }: { src: string; title?: string }) {
           />
         </div>
         <a
-          className="audio-download"
+          className="audio-icon-btn audio-download"
           href={downloadUrl(src)}
           download
           aria-label={`Download ${label}`}
           title="Download audio"
         >
-          <DownloadIcon />
+          <Download size={14} strokeWidth={2} />
         </a>
       </div>
       {failed && (
