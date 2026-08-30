@@ -285,6 +285,43 @@ label {
   outline-offset: 2px;
 }
 
+.preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.preset-chip {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.preset-chip:hover {
+  border-color: var(--primary);
+  color: var(--text);
+  background: var(--panel);
+}
+
+.preset-chip:active {
+  border-color: var(--primary-dark);
+  color: var(--primary);
+}
+
+.preset-chip:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .voice-approval-hint {
   font-size: 0.8rem;
 }

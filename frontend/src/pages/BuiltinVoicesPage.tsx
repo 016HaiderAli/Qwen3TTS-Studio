@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api, ApiError, type Narration } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { StatusBadge } from '../components/StatusBadge'
+import { EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
 import { SPEAKERS, getSpeaker } from '../customVoices'
 import { formatElapsed } from '../format'
 
@@ -117,6 +118,11 @@ export function BuiltinVoicesPage() {
     announcedRef.current = false
   }
 
+  const handlePreset = (presetIdx: number) => {
+    const preset = EXPRESSIVE_PRESETS[presetIdx]
+    setInstruct((prev) => applyInstructPreset(prev, preset, prev.trim().length > 0))
+  }
+
   const elapsed =
     result !== null && (result.status === 'queued' || result.status === 'running')
       ? formatElapsed(Date.now() - new Date(result.created_at).getTime())
@@ -205,6 +211,18 @@ export function BuiltinVoicesPage() {
                   Delivery direction{' '}
                   <span className="field-hint inline">optional — describe how it should sound</span>
                 </label>
+                <div className="preset-chips" role="group" aria-label="Expressive presets">
+                  {EXPRESSIVE_PRESETS.map((p, i) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      className="preset-chip"
+                      onClick={() => handlePreset(i)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
                 <input
                   id="bv-instruct"
                   type="text"

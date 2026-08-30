@@ -4,6 +4,7 @@ import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { ProgressBar } from '../components/ProgressBar'
 import { StatusBadge } from '../components/StatusBadge'
+import { EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
 import { formatElapsed } from '../format'
 
 const LANGUAGES = [
@@ -110,6 +111,11 @@ export function NarrationStudioPage() {
 
   const retryLoad = async () => {
     await load()
+  }
+
+  const handlePreset = (presetIdx: number) => {
+    const preset = EXPRESSIVE_PRESETS[presetIdx]
+    setDelivery((prev) => applyInstructPreset(prev, preset, prev.trim().length > 0))
   }
 
   const announceOnce = useCallback((id: string, status: string, message: string) => {
@@ -287,6 +293,18 @@ export function NarrationStudioPage() {
               </span>
             )}
           </span>
+          <div className="preset-chips" role="group" aria-label="Expressive presets">
+            {EXPRESSIVE_PRESETS.map((p, i) => (
+              <button
+                key={p.label}
+                type="button"
+                className="preset-chip"
+                onClick={() => handlePreset(i)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <label>
             Delivery / voice direction
             <textarea
@@ -294,7 +312,7 @@ export function NarrationStudioPage() {
               rows={2}
               value={delivery}
               onChange={(e) => setDelivery(e.target.value)}
-              placeholder="Optional: e.g. “Speak slowly and warmly, pause briefly after each sentence.”"
+              placeholder='Optional: e.g. "Speak slowly and warmly, pause briefly after each sentence."'
               disabled={formDisabled}
             />
           </label>
