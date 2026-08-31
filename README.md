@@ -39,6 +39,13 @@ Before running the application, make sure the following applications and tools a
 
 ## Local Execution Commands
 
+First, clone the repository (PowerShell or any terminal):
+
+```powershell
+git clone https://github.com/016HaiderAli/Voice-Studio.git
+cd Voice-Studio
+```
+
 Open separate terminal windows on your local machine to launch each service:
 
 ### Terminal 1: Backend Server (FastAPI)
@@ -80,6 +87,27 @@ npm run dev
 ngrok http 8000
 ```
 
+> **💡 Tip: Local Tunneling Setup (ngrok) without changing your PATH**
+>
+> You do not need to install ngrok globally or edit any system PATH
+> environment variables. Instead, place `ngrok.exe` directly inside the
+> project root folder (`Voice-Studio/ngrok.exe`), next to `backend/` and
+> `frontend/`.
+>
+> Because PowerShell (and Windows Terminal) resolve executables in the
+> current working directory, you can then start the tunnel straight from the
+> project root with `.\ngrok http 8000` — in the same terminal, or a second
+> one, while the FastAPI backend from Terminal 1 is already serving on
+> port 8000:
+>
+> ```powershell
+> # From the project root (Voice-Studio)
+> .\ngrok http 8000
+> ```
+>
+> This keeps the tunnel one command away on any machine you clone the repo
+> to — no installer, no system-wide configuration changes.
+
 ---
 
 ## Remote Worker Setup (Google Colab T4 GPU)
@@ -91,7 +119,10 @@ Because local integrated GPUs (such as Intel Iris Xe) cannot run the 1.7B parame
 3. Set your active ngrok URL and shared secret token in the Colab cell:
 
 ```python
-%cd /content/Qwen3TTS-Studio/worker
+# Clone the renamed repository into the Colab VM (pull if it already exists)
+!git clone https://github.com/016HaiderAli/Voice-Studio.git /content/Voice-Studio || (cd /content/Voice-Studio && git pull)
+%cd /content/Voice-Studio/worker
+
 import os
 os.environ["BACKEND_URL"] = "https://your-ngrok-static-domain.ngrok-free.dev"
 os.environ["WORKER_TOKEN"] = "dev-worker-token"
