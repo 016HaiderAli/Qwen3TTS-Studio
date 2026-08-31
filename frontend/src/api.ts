@@ -142,6 +142,8 @@ export const api = {
     script: string
     delivery_direction: string
     language: string
+    speed?: number
+    pitch?: number
   }) => request<Narration>('/api/narrations', { method: 'POST', body: JSON.stringify(body) }),
   deleteNarration: (id: string) =>
     request<void>(`/api/narrations/${id}`, { method: 'DELETE' }),
@@ -176,6 +178,8 @@ export const api = {
     script: string
     instruct: string
     title: string
+    speed?: number
+    pitch?: number
   }) =>
     request<Narration>('/api/builtin-voices/generate', {
       method: 'POST',

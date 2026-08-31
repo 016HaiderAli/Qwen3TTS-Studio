@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Wand2 } from 'lucide-react'
+import { Wand2, HelpCircle } from 'lucide-react'
 import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { ProgressBar } from '../components/ProgressBar'
+import { PromptGuideDrawer } from '../components/PromptGuideDrawer'
 import { StatusBadge } from '../components/StatusBadge'
 import { DEMO_DIALOGUE_SCRIPT, EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
 import { formatElapsed } from '../format'
@@ -73,6 +74,9 @@ export function NarrationStudioPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [announcement, setAnnouncement] = useState('')
+  const [speed, setSpeed] = useState(1.0)
+  const [pitch, setPitch] = useState(0)
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const statusRef = useRef<HTMLDivElement | null>(null)
   const announcedRef = useRef<Set<string>>(new Set())
   const scrolledRef = useRef<Set<string>>(new Set())
@@ -149,6 +153,17 @@ export function NarrationStudioPage() {
 
   const { selectRef: nsSelectRef, handleInsertSpeaker: nsHandleInsertTag } = useInsertSpeakerTag(setScript)
 
+  const handleInsertPromptTag = useCallback((tag: string) => {
+    setScript((prev) => {
+      const separator = prev.length > 0 && !prev.endsWith(' ') && !prev.endsWith('\n') ? ' ' : ''
+      return `${prev}${separator}${tag}`
+    })
+  }, [])
+
+  const handleLoadDemo = useCallback(() => {
+    setScript(DEMO_DIALOGUE_SCRIPT)
+  }, [])
+
   const announceOnce = useCallback((id: string, status: string, message: string) => {
     const key = `${id}:${status}`
     if (announcedRef.current.has(key)) return
@@ -200,6 +215,8 @@ export function NarrationStudioPage() {
         script,
         delivery_direction: delivery,
         language,
+        speed,
+        pitch,
       })
       setNarration(created)
       setAnnouncement('Generation started.')
@@ -355,13 +372,25 @@ export function NarrationStudioPage() {
               >
                 Insert
               </button>
-              <button
-                type="button"
-                className="demo-btn"
-                onClick={() => setScript(DEMO_DIALOGUE_SCRIPT)}
-              >
-                Load demo dialogue
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setIsDrawerOpen(true)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
+                >
+                  <HelpCircle size={16} />
+                  <span>Prompt Helper</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleLoadDemo}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
+                >
+                  Load demo dialogue
+                </button>
+              </div>
             </div>
 
             <textarea
@@ -386,6 +415,49 @@ export function NarrationStudioPage() {
                 </span>
               )}
             </span>
+          </div>
+
+          <div
+            className="expressiveness-group"
+            style={{ margin: '1.5rem 0', padding: '1rem', background: 'var(--panel-2)', borderRadius: '8px', border: '1px solid var(--border)' }}
+          >
+            <h4 style={{ color: 'var(--text)', marginBottom: '1rem' }}>Expressiveness & Audio Controls</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+              <div>
+                <label style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                  <span>Speech Rate</span>
+                  <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{speed.toFixed(1)}x</span>
+                </label>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={2.0}
+                  step={0.1}
+                  value={speed}
+                  onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                  disabled={formDisabled}
+                  aria-label={`Speech rate: ${speed.toFixed(1)}x`}
+                  style={{ width: '100%', accentColor: 'var(--primary)' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                  <span>Pitch Shift</span>
+                  <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{pitch > 0 ? `+${pitch}` : pitch} st</span>
+                </label>
+                <input
+                  type="range"
+                  min={-12}
+                  max={12}
+                  step={1}
+                  value={pitch}
+                  onChange={(e) => setPitch(parseInt(e.target.value, 10))}
+                  disabled={formDisabled}
+                  aria-label={`Pitch shift: ${pitch} semitones`}
+                  style={{ width: '100%', accentColor: 'var(--primary)' }}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="form-group">
@@ -438,6 +510,12 @@ export function NarrationStudioPage() {
             {busy ? 'Starting…' : active ? 'Generating…' : 'Generate narration'}
           </button>
         </form>
+
+        <PromptGuideDrawer
+          isOpen={isDrawerOpen}
+          onClose={() => setIsDrawerOpen(false)}
+          onInsert={handleInsertPromptTag}
+        />
 
         <aside className="studio-status" ref={statusRef}>
           {selectedVoice && (
