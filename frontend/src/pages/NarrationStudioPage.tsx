@@ -344,12 +344,31 @@ export function NarrationStudioPage() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="ns-script">Script</label>
+            <div className="script-header-row">
+              <label htmlFor="ns-script">Script</label>
+              <div className="script-header-actions">
+                <button
+                  type="button"
+                  className="tool-btn"
+                  onClick={() => setIsDrawerOpen(true)}
+                >
+                  <HelpCircle size={16} />
+                  <span>Prompt Helper</span>
+                </button>
+                <button
+                  type="button"
+                  className="tool-btn"
+                  onClick={handleLoadDemo}
+                >
+                  Load demo dialogue
+                </button>
+              </div>
+            </div>
 
-            <div className="dialogue-toolbar">
+            <div className="speaker-tag-strip">
               <span className="dialogue-toolbar-label">
                 <Wand2 size={12} strokeWidth={2.5} style={{ display: 'inline', marginRight: 4 }} />
-                Speaker tag
+                Speaker tag:
               </span>
               <select
                 id="ns-insert-speaker"
@@ -372,25 +391,6 @@ export function NarrationStudioPage() {
               >
                 Insert
               </button>
-              <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => setIsDrawerOpen(true)}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
-                >
-                  <HelpCircle size={16} />
-                  <span>Prompt Helper</span>
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={handleLoadDemo}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
-                >
-                  Load demo dialogue
-                </button>
-              </div>
             </div>
 
             <textarea

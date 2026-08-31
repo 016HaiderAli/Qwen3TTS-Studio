@@ -45,6 +45,11 @@ const LANGUAGES = [
   'Italian',
 ]
 
+const SINGLE_DEMO_SCRIPT =
+  'Welcome to Voice Studio. This sample script is narrated by the single speaker you selected — no speaker tags required.'
+
+type GenerationMode = 'single' | 'multi'
+
 function SpeakerCard({
   speaker,
   selected,
@@ -110,6 +115,7 @@ function SpeakerCard({
 }
 
 export function BuiltinVoicesPage() {
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('single')
   const [selectedSpeaker, setSelectedSpeaker] = useState(SPEAKERS[0].id)
   const [language, setLanguage] = useState('English')
   const [script, setScript] = useState('')
@@ -283,8 +289,8 @@ export function BuiltinVoicesPage() {
   }, [])
 
   const handleLoadDemo = useCallback(() => {
-    setScript(DEMO_DIALOGUE_SCRIPT)
-  }, [])
+    setScript(generationMode === 'single' ? SINGLE_DEMO_SCRIPT : DEMO_DIALOGUE_SCRIPT)
+  }, [generationMode])
 
   const { selectRef: bvSelectRef, handleInsertSpeaker: bvHandleInsertTag } = useInsertSpeakerTag(setScript)
 
@@ -302,6 +308,25 @@ export function BuiltinVoicesPage() {
       </div>
       <div role="status" aria-live="polite" className="sr-only">
         {announcement}
+      </div>
+
+      <div className="mode-toggle" role="group" aria-label="Generation mode">
+        <button
+          type="button"
+          className={`mode-toggle-option ${generationMode === 'single' ? 'active' : ''}`}
+          onClick={() => setGenerationMode('single')}
+          aria-pressed={generationMode === 'single'}
+        >
+          Single Voice
+        </button>
+        <button
+          type="button"
+          className={`mode-toggle-option ${generationMode === 'multi' ? 'active' : ''}`}
+          onClick={() => setGenerationMode('multi')}
+          aria-pressed={generationMode === 'multi'}
+        >
+          Multi-Speaker Dialogue
+        </button>
       </div>
 
       <div className="studio-layout" style={{ gridTemplateColumns: '1fr' }}>
@@ -369,61 +394,67 @@ export function BuiltinVoicesPage() {
               </div>
 
               <div className="form-group">
-                <label htmlFor="bv-script">Script *</label>
-
-                <div className="dialogue-toolbar">
-                  <span className="dialogue-toolbar-label">
-                    <Wand2 size={12} strokeWidth={2.5} style={{ display: 'inline', marginRight: 4 }} />
-                    Speaker tag
-                  </span>
-                  <select
-                    id="bv-insert-speaker"
-                    ref={bvSelectRef}
-                    defaultValue=""
-                    aria-label="Insert speaker tag"
-                  >
-                    <option value="" disabled>Choose…</option>
-                    {allSpeakerOptions.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => {
-                      const ta = scriptRef.current
-                      if (ta) bvHandleInsertTag(ta)
-                    }}
-                  >
-                    Insert
-                  </button>
-                  <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
+                <div className="script-header-row">
+                  <label htmlFor="bv-script">Script *</label>
+                  <div className="script-header-actions">
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="tool-btn"
                       onClick={() => setIsDrawerOpen(true)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
                     >
                       <HelpCircle size={16} />
                       <span>Prompt Helper</span>
                     </button>
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="tool-btn"
                       onClick={handleLoadDemo}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
                     >
-                      Load demo dialogue
+                      {generationMode === 'single' ? 'Load sample text' : 'Load demo dialogue'}
                     </button>
                   </div>
                 </div>
+
+                {generationMode === 'multi' && (
+                  <div className="speaker-tag-strip">
+                    <span className="dialogue-toolbar-label">
+                      <Wand2 size={12} strokeWidth={2.5} style={{ display: 'inline', marginRight: 4 }} />
+                      Speaker tag:
+                    </span>
+                    <select
+                      id="bv-insert-speaker"
+                      ref={bvSelectRef}
+                      defaultValue=""
+                      aria-label="Insert speaker tag"
+                    >
+                      <option value="" disabled>Choose…</option>
+                      {allSpeakerOptions.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => {
+                        const ta = scriptRef.current
+                        if (ta) bvHandleInsertTag(ta)
+                      }}
+                    >
+                      Insert
+                    </button>
+                  </div>
+                )}
 
                 <textarea
                   id="bv-script"
                   ref={scriptRef}
                   value={script}
                   onChange={(e) => setScript(e.target.value)}
-                  placeholder="Enter the text you want to narrate…"
+                  placeholder={
+                    generationMode === 'single'
+                      ? 'Enter the script to narrate...'
+                      : 'Enter dialogue with speaker tags, e.g.,\n[Speaker: Vivian] Hello!\n[Speaker: Senku] High-tech science time!'
+                  }
                   rows={10}
                   required
                 />

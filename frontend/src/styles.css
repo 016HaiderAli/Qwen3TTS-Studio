@@ -1480,6 +1480,47 @@ label {
   }
 }
 
+/* ====== Mode toggle (single / multi-speaker) ====== */
+.mode-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.3rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 1.25rem;
+}
+
+.mode-toggle-option {
+  padding: 0.45rem 1.1rem;
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.mode-toggle-option:hover {
+  color: var(--text);
+}
+
+.mode-toggle-option.active {
+  background: var(--primary);
+  color: #0f1117;
+  box-shadow: 0 2px 8px var(--primary-glow);
+}
+
+.mode-toggle-option:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 /* ====== Misc utility ====== */
 .char-count {
   font-size: 0.75rem;
@@ -1487,36 +1528,89 @@ label {
   text-align: right;
 }
 
-/* ====== Prompt Guide Drawer ====== */
-.btn-secondary {
+/* ====== Script header row ====== */
+.script-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.script-header-row label {
+  margin-bottom: 0;
+}
+
+.script-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Subtle utility button: quiet by default, teal glow on hover */
+.tool-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 0.4rem;
   border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
+  background: transparent;
+  color: var(--text-secondary);
   border-radius: var(--radius-sm);
-  padding: 0.3rem 0.65rem;
+  padding: 0.35rem 0.75rem;
   font-size: 0.8rem;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease,
     box-shadow 0.15s ease, transform 0.1s ease;
   white-space: nowrap;
   user-select: none;
 }
 
-.btn-secondary:hover {
+.tool-btn:hover {
   border-color: var(--primary);
   color: var(--primary);
-  background: var(--panel-3);
+  background: var(--accent-dim);
+  box-shadow: 0 0 8px var(--primary-glow);
 }
 
-.btn-secondary:active {
+.tool-btn:active {
   transform: scale(0.97);
 }
+
+.tool-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Compact speaker-tag strip (multi-speaker mode only) */
+.speaker-tag-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+  width: fit-content;
+}
+
+.speaker-tag-strip select {
+  max-width: 180px;
+  padding: 0.25rem 2rem 0.25rem 0.6rem;
+  font-size: 0.82rem;
+  background-size: 10px;
+}
+
+.speaker-tag-strip .btn {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+/* ====== Prompt Guide Drawer ====== */
 
 .prompt-guide-drawer {
   position: fixed;
