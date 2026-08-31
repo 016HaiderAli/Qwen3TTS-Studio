@@ -21,7 +21,10 @@ from dataclasses import dataclass
 
 _TAG_PATTERN = re.compile(
     r"\[Speaker:\s*(?P<speaker>[^\]]+)\]"
-    r"(?:\s*\[(?P<segment_instruct>[^\]]+)\])?",
+    # The optional per-segment instruct tag must not swallow pause tags
+    # ([Pause: 1s]) that directly follow a speaker tag — those belong to the
+    # Phase 5C pause parser, not the delivery instruction.
+    r"(?:\s*\[(?!Pause:\s*\d)(?P<segment_instruct>[^\]]+)\])?",
     re.IGNORECASE,
 )
 

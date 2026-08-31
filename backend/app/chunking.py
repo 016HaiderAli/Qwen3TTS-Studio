@@ -6,8 +6,15 @@ documented deviation (see docs/DEVIATIONS.md section 2): sentence boundaries
 between different paragraphs are preserved inside a chunk with a blank line
 instead of a single space, so Qwen3-TTS receives the original paragraph
 structure and can interpret pauses and emphasis natively.
+
+Phase 5C adds pause awareness: ``[Pause: 1.5s]``-style tags (see
+``app/pauses.py``) act as hard split points, and ``chunk_script_with_pauses``
+returns an ordered speech/pause sequence the completion stage stitches into
+the final WAV.
 """
 import re
+
+from .pauses import split_on_pauses
 
 _PARAGRAPH_SPLIT = re.compile(r"\n\s*\n")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -49,6 +56,14 @@ def chunk_script(
     text = (text or "").strip()
     if not text:
         raise ValueError("Script cannot be empty.")
+    return _pack_speech(text, max_words_per_chunk)
+
+
+def _pack_speech(text: str, max_words_per_chunk: int) -> list[str]:
+    """Greedy sentence packing for one contiguous speech run."""
+    text = (text or "").strip()
+    if not text:
+        return []
 
     sentences = split_sentences(text)
     chunks: list[str] = []
@@ -68,6 +83,51 @@ def chunk_script(
         chunks.append(_join(current))
 
     return chunks
+
+
+def chunk_script_with_pauses(
+    text: str,
+    max_words_per_chunk: int = 80,
+) -> tuple[list[str], list[dict] | None]:
+    """Split a script into spoken chunks plus an optional pause sequence.
+
+    ``[Pause: ...]`` tags (case-insensitive, ``s`` or ``ms`` units) act as
+    hard split points: the text between tags is chunked independently with the
+    normal greedy packer, and each tag becomes a pause entry.
+
+    Returns ``(chunks, sequence)``. When the script contains no pause tags the
+    result is identical to :func:`chunk_script` with ``sequence=None``.
+    Otherwise ``sequence`` is a list of items in exact script order —
+    ``{"type": "speech", "chunk_index": i}`` and
+    ``{"type": "pause", "duration_sec": seconds}`` — which the completion
+    stage uses to stitch zero-filled silence between the generated chunk WAVs.
+
+    Raises:
+        ValueError: when the script is empty or contains no speakable text
+            (only pause tags).
+    """
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Script cannot be empty.")
+
+    items = split_on_pauses(text)
+    if not any(item.kind == "speech" for item in items):
+        raise ValueError("Script contains no speakable text.")
+
+    chunks: list[str] = []
+    sequence: list[dict] = []
+    has_pause = any(item.kind == "pause" for item in items)
+
+    for item in items:
+        if item.kind == "pause":
+            sequence.append({"type": "pause", "duration_sec": item.duration_sec})
+            continue
+        for piece in _pack_speech(item.text, max_words_per_chunk):
+            if has_pause:
+                sequence.append({"type": "speech", "chunk_index": len(chunks)})
+            chunks.append(piece)
+
+    return chunks, (sequence if has_pause else None)
 
 
 def _join(sentences: list[tuple[str, int]]) -> str:

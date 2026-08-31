@@ -60,10 +60,14 @@ def clone_prompt_payload(voice: Voice) -> dict:
     }
 
 
-def narration_payload(narration: Narration, chunks: list[str]) -> dict:
+def narration_payload(
+    narration: Narration,
+    chunks: list[str],
+    sequence: list[dict] | None = None,
+) -> dict:
     voice = narration.voice
     prompt = storage.read_bytes(voice.prompt_pt_path)
-    return {
+    payload = {
         "voice_id": voice.id,
         "narration_id": narration.id,
         "language": narration.language,
@@ -71,6 +75,11 @@ def narration_payload(narration: Narration, chunks: list[str]) -> dict:
         "chunks": chunks,
         "prompt_pt_b64": base64.b64encode(prompt).decode("ascii"),
     }
+    if sequence:
+        # Optional pause-aware stitching plan (Phase 5C). Unknown to older
+        # workers, which simply ignore it; the backend applies it at completion.
+        payload["sequence"] = sequence
+    return payload
 
 
 def builtin_voice_payload(
@@ -78,6 +87,7 @@ def builtin_voice_payload(
     speaker: str,
     instruct: str,
     dialogue_segments: list[dict] | None = None,
+    sequence: list[dict] | None = None,
 ) -> dict:
     """Payload for a ``custom_voice`` job (Qwen3-TTS CustomVoice).
 
@@ -89,6 +99,10 @@ def builtin_voice_payload(
     When ``dialogue_segments`` is provided, the script contains multi-speaker
     dialogue and the worker generates each segment with its specific speaker,
     then concatenates the results with silence gaps between turns.
+
+    When ``sequence`` is provided, it is a Phase 5C pause-aware stitching plan
+    (speech chunk indices interleaved with pause/gap silence durations) that
+    the backend applies at completion; the worker never needs it.
     """
     payload: dict = {
         "voice_source": "custom_voice",
@@ -100,6 +114,8 @@ def builtin_voice_payload(
     }
     if dialogue_segments is not None:
         payload["dialogue_segments"] = dialogue_segments
+    if sequence:
+        payload["sequence"] = sequence
     return payload
 
 
@@ -298,9 +314,12 @@ def complete_job(
             raise RuntimeError(f"expected {count} chunk files, found {len(existing)}")
         # Concatenate to the final audio now: a chunk-read/format failure must
         # surface before the job can be marked succeeded.
-        sr, duration = audio.concat_wav_files(
-            existing, storage.root() / storage.narration_final_rel(narration.id)
-        )
+        final_path = storage.root() / storage.narration_final_rel(narration.id)
+        sequence = _payload_sequence(job)
+        if sequence:
+            sr, duration = audio.concat_wav_sequence(paths, sequence, final_path)
+        else:
+            sr, duration = audio.concat_wav_files(existing, final_path)
     elif job.type == "custom_voice":
         narration = db.get(Narration, job.narration_id)
         if narration is None:
@@ -314,11 +333,16 @@ def complete_job(
             raise RuntimeError(
                 f"expected {seg_count} custom_voice chunk file(s), found {len(existing)}"
             )
-        sr, duration = audio.concat_wav_files(
-            existing,
-            storage.root() / storage.narration_final_rel(narration.id),
-            silence_ms=300,
-        )
+        final_path = storage.root() / storage.narration_final_rel(narration.id)
+        sequence = _payload_sequence(job)
+        if sequence:
+            sr, duration = audio.concat_wav_sequence(chunk_paths, sequence, final_path)
+        else:
+            sr, duration = audio.concat_wav_files(
+                existing,
+                final_path,
+                silence_ms=300,
+            )
 
     _clear_lease(job)
     job.status = "succeeded"
@@ -456,6 +480,17 @@ def _mark_failed_owner_object(db: Session, job: Job, error: str) -> None:
 def _chunk_count(job: Job) -> int:
     payload = json.loads(job.payload_json)
     return len(payload.get("chunks", []))
+
+
+def _payload_sequence(job: Job) -> list[dict] | None:
+    """Return the optional pause-aware stitching plan from the job payload.
+
+    Absent on pre-Phase-5C jobs, in which case completion falls back to the
+    plain concatenation path — full backward compatibility with existing
+    worker payloads and database records.
+    """
+    payload = json.loads(job.payload_json)
+    return payload.get("sequence")
 
 
 def clear_partial_chunks(narration_id: str) -> None:

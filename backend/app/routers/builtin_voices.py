@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import jobs as job_service
+from .. import pauses
 from ..custom_voices import get_speaker, is_known_speaker, list_speakers
 from ..db import get_db
 from ..deps import get_current_user
@@ -18,6 +19,9 @@ from ..schemas import (
 from ..voice import get_builtin_voice_id
 
 router = APIRouter(prefix="/api/builtin-voices", tags=["builtin-voices"])
+
+# Historical inter-turn silence (see complete_job custom_voice concat).
+TURN_GAP_SECONDS = 0.3
 
 
 @router.get("", response_model=list[BuiltinVoiceInfo])
@@ -50,6 +54,66 @@ def _validate_dialogue_segments(
     return result
 
 
+def _apply_pause_splits(
+    segments: list[DialogueSegment],
+    default_instruct: str = "",
+) -> tuple[list[dict], list[dict] | None]:
+    """Split segment texts on ``[Pause: ...]`` tags (Phase 5C).
+
+    Pause tags are hard split points: each speech piece becomes its own
+    dialogue segment (same speaker and instruct), so the worker generates one
+    WAV per piece and the completion stage can stitch zero-filled silence at
+    exactly the tagged positions. The returned sequence records the exact
+    speech/pause order, with ``gap`` entries (0.3 s) between consecutive input
+    segments to preserve the historical inter-turn silence.
+
+    Returns ``(dialogue_segments, sequence)``. When no input text contains a
+    pause tag, the segments pass through unchanged and the sequence is None,
+    leaving existing behavior untouched. ``default_instruct`` fills the piece
+    instruct for segments that carry none (used when a single-speaker script
+    would otherwise have been generated as one chunk with the global
+    instruct).
+
+    Raises:
+        HTTPException: 422 when no speech pieces remain (pause-only script).
+    """
+    has_pause = any(pauses.has_pause_tags(s.text) for s in segments)
+    if not has_pause:
+        return (
+            [
+                {"speaker": s.speaker, "text": s.text, "instruct": s.segment_instruct}
+                for s in segments
+            ],
+            None,
+        )
+
+    speech: list[dict] = []
+    sequence: list[dict] = []
+    for pos, seg in enumerate(segments):
+        if pos > 0:
+            sequence.append({"type": "gap", "duration_sec": TURN_GAP_SECONDS})
+        for item in pauses.split_on_pauses(seg.text):
+            if item.kind == "pause":
+                sequence.append(
+                    {"type": "pause", "duration_sec": item.duration_sec}
+                )
+                continue
+            sequence.append({"type": "speech", "chunk_index": len(speech)})
+            speech.append(
+                {
+                    "speaker": seg.speaker,
+                    "text": item.text,
+                    "instruct": seg.segment_instruct or default_instruct,
+                }
+            )
+
+    if not speech:
+        raise HTTPException(
+            status_code=422, detail="Script contains no speakable text."
+        )
+    return speech, sequence
+
+
 @router.post("/generate", response_model=NarrationResponse, status_code=status.HTTP_201_CREATED)
 def generate_builtin_voice(
     body: BuiltinVoiceGenerateRequest,
@@ -62,39 +126,61 @@ def generate_builtin_voice(
     speaker_info = get_speaker(body.speaker)
     instruct = body.instruct.strip()
     dialogue_segments: list[dict] | None = None
+    sequence: list[dict] | None = None
 
     if body.dialogue_segments is not None:
         validated = _validate_dialogue_segments(body.dialogue_segments)
-        script = " | ".join(f"[{s.speaker}] {s.text}" for s in validated)
-        dialogue_segments = [
-            {"speaker": s.speaker, "text": s.text, "instruct": s.segment_instruct}
-            for s in validated
-        ]
+        if any(pauses.has_pause_tags(s.text) for s in validated):
+            dialogue_segments, sequence = _apply_pause_splits(validated)
+            script = " | ".join(
+                f"[{seg['speaker']}] {seg['text']}" for seg in dialogue_segments
+            )
+        else:
+            script = " | ".join(f"[{s.speaker}] {s.text}" for s in validated)
+            dialogue_segments = [
+                {"speaker": s.speaker, "text": s.text, "instruct": s.segment_instruct}
+                for s in validated
+            ]
     else:
         script = body.script.strip()
         if not script:
             raise HTTPException(status_code=422, detail="Script cannot be empty.")
         parsed = parse_dialogue_script(script, body.speaker)
-        if len(parsed) > 1:
-            validated_segments = [
-                s for s in parsed if is_known_speaker(s.speaker)
+        validated_segments = [s for s in parsed if is_known_speaker(s.speaker)]
+        merged: list[DialogueSegment] = []
+        for s in validated_segments:
+            if (
+                merged
+                and merged[-1].speaker == s.speaker
+                and not merged[-1].segment_instruct
+                and not s.segment_instruct
+            ):
+                merged[-1] = DialogueSegment(
+                    speaker=s.speaker,
+                    text=f"{merged[-1].text} {s.text}",
+                    segment_instruct="",
+                )
+            else:
+                merged.append(s)
+        if any(pauses.has_pause_tags(s.text) for s in parsed):
+            # Pause-aware path: each pause tag becomes its own silence entry,
+            # so pieces must map 1:1 to worker-generated segment WAVs. The
+            # single-segment case inherits the global instruct (it would
+            # otherwise have been generated as one chunk with it).
+            pieces = merged if merged else parsed
+            default_instruct = instruct if len(pieces) == 1 else ""
+            dialogue_segments, sequence = _apply_pause_splits(
+                pieces, default_instruct
+            )
+            script = " | ".join(
+                f"[{seg['speaker']}] {seg['text']}" for seg in dialogue_segments
+            )
+        elif len(merged) > 1:
+            script = " | ".join(f"[{s.speaker}] {s.text}" for s in merged)
+            dialogue_segments = [
+                {"speaker": s.speaker, "text": s.text, "instruct": s.segment_instruct}
+                for s in merged
             ]
-            merged: list[DialogueSegment] = []
-            for s in validated_segments:
-                if merged and merged[-1].speaker == s.speaker and not merged[-1].segment_instruct and not s.segment_instruct:
-                    merged[-1] = DialogueSegment(
-                        speaker=s.speaker,
-                        text=f"{merged[-1].text} {s.text}",
-                        segment_instruct="",
-                    )
-                else:
-                    merged.append(s)
-            if len(merged) > 1:
-                script = " | ".join(f"[{s.speaker}] {s.text}" for s in merged)
-                dialogue_segments = [
-                    {"speaker": s.speaker, "text": s.text, "instruct": s.segment_instruct}
-                    for s in merged
-                ]
 
     narration = Narration(
         owner_id=user.id,
@@ -115,6 +201,7 @@ def generate_builtin_voice(
         speaker=body.speaker,
         instruct=instruct,
         dialogue_segments=dialogue_segments,
+        sequence=sequence,
     )
     job_service.enqueue(
         db,

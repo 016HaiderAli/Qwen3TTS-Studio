@@ -166,7 +166,12 @@ def create_narration(
     script = body.script.strip()
     if not script:
         raise HTTPException(status_code=422, detail="Script cannot be empty.")
-    chunks = chunking.chunk_script(script, settings.max_chunk_words)
+    try:
+        chunks, sequence = chunking.chunk_script_with_pauses(
+            script, settings.max_chunk_words
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
     narration = Narration(
         owner_id=user.id,
@@ -182,7 +187,7 @@ def create_narration(
     db.add(narration)
     db.flush()
 
-    payload = job_service.narration_payload(narration, chunks)
+    payload = job_service.narration_payload(narration, chunks, sequence)
     job = job_service.enqueue(
         db,
         owner_id=user.id,
