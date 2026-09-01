@@ -168,12 +168,41 @@ class QwenBackend(InferenceBackend):
         prompt_pt_b64: str,
         language: str,
         instruct: str,
+        ref_audio_b64: str = "",
+        ref_text: str = "Voice cloning reference sample.",
         voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
         import torch
 
         model = self._load_base()
-        saved = deserialize_prompt(base64.b64decode(prompt_pt_b64))
+
+        # --- Resolve the voice-clone prompt --------------------------------
+        # Priority 1: pre-baked .pt (fastest — embed derived at clone time).
+        # Priority 2: zero-shot from reference audio (slower — derives embed
+        #             on the fly via create_voice_clone_prompt, notebook cell 21).
+        # Neither present → hard error with an actionable message.
+        if prompt_pt_b64:
+            logger.info("narrate: using pre-baked clone prompt")
+            saved = deserialize_prompt(base64.b64decode(prompt_pt_b64))
+        elif ref_audio_b64:
+            logger.info(
+                "narrate: no pre-baked prompt — deriving clone prompt from "
+                "reference audio (zero-shot path)"
+            )
+            saved = deserialize_prompt(
+                self.create_clone_prompt(
+                    ref_audio_b64=ref_audio_b64,
+                    ref_text=ref_text,
+                    language=language,
+                )
+            )
+        else:
+            raise ValueError(
+                "No voice prompt or reference audio provided for narration. "
+                "The voice must have either a pre-baked clone prompt (.pt) or "
+                "a reference audio clip (ref_audio_b64) in the job payload."
+            )
+
         device = next(model.model.parameters()).device
         prompt_item = restore_prompt_item(saved, device)
         prompt_list = [prompt_item]
@@ -213,6 +242,7 @@ class QwenBackend(InferenceBackend):
                 SynthesisOutput(data, int(sr), round(float(duration), 3))
             )
         return outputs
+
 
     def generate_custom_voice(
         self,

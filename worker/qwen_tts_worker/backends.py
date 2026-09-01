@@ -42,9 +42,17 @@ class InferenceBackend(ABC):
         prompt_pt_b64: str,
         language: str,
         instruct: str,
+        ref_audio_b64: str = "",
+        ref_text: str = "Voice cloning reference sample.",
         voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
-        """Generate one WAV per chunk using the voice-clone prompt."""
+        """Generate one WAV per chunk using the voice-clone prompt.
+
+        ``prompt_pt_b64`` — base64-encoded serialized clone prompt (.pt). When
+        empty/absent the worker must fall back to ``ref_audio_b64`` (zero-shot
+        path) or raise a descriptive ValueError.
+        ``ref_audio_b64`` — base64-encoded reference WAV for zero-shot synthesis.
+        """
 
     @abstractmethod
     def generate_custom_voice(
@@ -140,8 +148,14 @@ class MockBackend(InferenceBackend):
         prompt_pt_b64: str,
         language: str,
         instruct: str,
+        ref_audio_b64: str = "",
+        ref_text: str = "Voice cloning reference sample.",
         voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
+        # The mock generates deterministic synthetic audio regardless of which
+        # path (pre-baked prompt vs. zero-shot reference) the real backend would
+        # take. ref_audio_b64 and ref_text are accepted for interface parity but
+        # are not used; prompt_pt_b64 still seeds the tone for test assertions.
         speed = float(self._setting(voice_setting, "speed", 1.0))
         vol = float(self._setting(voice_setting, "vol", 1.0))
         pitch_st = int(self._setting(voice_setting, "pitch", 0))

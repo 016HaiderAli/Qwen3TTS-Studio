@@ -99,13 +99,22 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
         language = payload.get("language") or "English"
         instruct = payload.get("instruct") or ""
         voice_setting = payload.get("voice_setting") or None
+        # Zero-shot path: ref_audio_b64 is present when the voice has no
+        # pre-baked .pt yet; ref_text is the speaker's reference transcript.
+        ref_audio_b64 = payload.get("ref_audio_b64") or ""
+        ref_text = payload.get("ref_text") or "Voice cloning reference sample."
         logger.info(
-            "narration job %s: language=%s instruct=%r chunks=%d voice_setting=%r",
-            job_id, language, instruct, len(chunks), voice_setting,
+            "narration job %s: language=%s instruct=%r chunks=%d "
+            "has_prompt=%s has_ref_audio=%s voice_setting=%r",
+            job_id, language, instruct, len(chunks),
+            bool(payload.get("prompt_pt_b64")), bool(ref_audio_b64),
+            voice_setting,
         )
         outputs = backend.narrate(
             chunks=chunks,
             prompt_pt_b64=payload.get("prompt_pt_b64") or "",
+            ref_audio_b64=ref_audio_b64,
+            ref_text=ref_text,
             language=language,
             instruct=instruct,
             voice_setting=voice_setting,
@@ -183,11 +192,15 @@ def run_once(config: WorkerConfig, client: WorkerAPIClient, backend: InferenceBa
         _process_job(client, backend, claim)
     except Exception as exc:  # report failure and keep the loop alive
         logger.exception("job %s failed", claim.get("job_id"))
+        # str(exc) is empty for bare exception types (e.g. EOFError(), TypeError())
+        # which would fail the backend's FailRequest min_length=1 validation and
+        # raise a secondary WorkerAPIError that silences the original error.
+        err_msg = str(exc) or repr(exc) or "Unknown worker execution error"
         try:
             client.fail(
                 claim.get("job_id"),
                 claim.get("claim_token") or "",
-                str(exc),
+                err_msg,
             )
         except WorkerAPIError:
             logger.exception("could not report failure for job %s", claim.get("job_id"))

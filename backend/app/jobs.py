@@ -67,7 +67,28 @@ def narration_payload(
     voice_setting: dict | None = None,
 ) -> dict:
     voice = narration.voice
-    prompt = storage.read_bytes(voice.prompt_pt_path)
+
+    # 1. Check for pre-calculated .pt prompt.
+    # safe_resolve returns None when the path is absent/not a file; guard before
+    # calling .exists() to avoid AttributeError on None.
+    prompt_pt_b64 = ""
+    if voice.prompt_pt_path:
+        resolved = storage.safe_resolve(voice.prompt_pt_path)
+        if resolved is not None and resolved.exists():
+            prompt_bytes = storage.read_bytes(voice.prompt_pt_path)
+            prompt_pt_b64 = base64.b64encode(prompt_bytes).decode("ascii")
+
+    # 2. Zero-shot fallback: include reference audio when no .pt is available.
+    # The worker uses this to derive a clone prompt on the fly (Qwen base model
+    # `create_voice_clone_prompt` path). Only populated when prompt_pt_b64 is
+    # absent so the worker never receives both.
+    ref_audio_b64 = ""
+    if not prompt_pt_b64 and voice.reference_audio_path:
+        ref_path = storage.safe_resolve(voice.reference_audio_path)
+        if ref_path is not None and ref_path.exists():
+            ref_bytes = storage.read_bytes(voice.reference_audio_path)
+            ref_audio_b64 = base64.b64encode(ref_bytes).decode("ascii")
+
     payload = {
         "voice_id": voice.id,
         "narration_id": narration.id,
@@ -75,17 +96,20 @@ def narration_payload(
         "instruct": narration.delivery_direction,
         "delivery_instruction": narration.delivery_direction,
         "chunks": chunks,
-        "prompt_pt_b64": base64.b64encode(prompt).decode("ascii"),
+        "ref_audio_b64": ref_audio_b64,
+        "ref_text": getattr(voice, "reference_text", None) or "Voice cloning reference sample.",
     }
+    # Only include prompt_pt_b64 when genuinely non-empty. An absent key is the
+    # unambiguous signal to the worker that the zero-shot reference-audio path
+    # should be used; sending an empty string would cause the Qwen backend to
+    # attempt torch.load(b"") which raises EOFError.
+    if prompt_pt_b64:
+        payload["prompt_pt_b64"] = prompt_pt_b64
     if voice_setting:
-        # Phase 7B: structured model-studio voice parameters flow to the worker.
         payload["voice_setting"] = voice_setting
     if sequence:
-        # Optional pause-aware stitching plan (Phase 5C). Unknown to older
-        # workers, which simply ignore it; the backend applies it at completion.
         payload["sequence"] = sequence
     return payload
-
 
 def builtin_voice_payload(
     narration: Narration,
@@ -428,6 +452,15 @@ def complete_job(
             storage.promote_voice_prompt(voice.id)
             voice.reference_audio_path = promoted_ref
             voice.status = "approved"
+            voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
+        elif voice.status == "approved":
+            # Phase 7A upload-clone path: voice_clone.py registers the voice as
+            # "approved" immediately (reference already written; no preview slot
+            # to promote). The staged .pt still needs to be promoted into the
+            # live slot and the DB path recorded so has_approved_prompt returns
+            # True and narrations prefer the faster clone-prompt path over the
+            # zero-shot reference-audio fallback.
+            storage.promote_voice_prompt(voice.id)
             voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
     elif job.type == "narration":
         # The sample rate parsed from the actual WAV chunks is authoritative for
