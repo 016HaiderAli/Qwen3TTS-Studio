@@ -1900,29 +1900,38 @@ label {
   outline-offset: 2px;
 }
 
-/* Real-time Web Audio equalizer (Phase 6B polish) */
-.waveform-bars {
+/* Messenger / WhatsApp-style static voice-note waveform.
+   Bars ahead of the playhead stay muted obsidian; bars behind fill with the
+   glowing teal primary color. Heights are static (pre-calculated pattern),
+   so rendering never jitters. Clicking the track scrubs. */
+.voice-waveform {
   display: flex;
   align-items: center;
   gap: 3px;
   height: 42px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.voice-waveform:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 
 .waveform-bar {
-  width: 4px;
-  min-height: 2px;
-  border-radius: 2px;
-  background: var(--primary);
-  opacity: 0.4;
-  transition: height 0.08s linear, opacity 0.25s ease;
+  width: 3px;
+  min-height: 2px; /* 2 px baseline stub for the shortest bars */
+  border-radius: 999px;
+  background: var(--border); /* muted obsidian ahead of the playhead */
+  opacity: 0.9;
+  transition: background 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
 
-/* Playing: full-opacity bars with high-intensity teal glow; heights are
-   driven per-frame by analyser.getByteFrequencyData() — no CSS keyframes. */
-.waveform-bars.playing .waveform-bar {
+.waveform-bar.played {
+  background: var(--primary); /* active teal behind the playhead */
+  box-shadow: 0 0 6px rgba(20, 184, 166, 0.6);
   opacity: 1;
-  box-shadow: 0 0 12px rgba(20, 184, 166, 0.7);
-  filter: drop-shadow(0 0 6px rgba(20, 184, 166, 0.5));
 }
 
 .voice-preview-loading {
