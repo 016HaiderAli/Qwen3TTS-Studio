@@ -145,6 +145,12 @@ class QwenBackend(InferenceBackend):
         wav, sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
         if wav.ndim > 1:
             wav = np.mean(wav, axis=-1).astype(np.float32)
+        # Zero-shot leak guard: the transcript is OPTIONAL embedding guidance.
+        # When no real transcript is saved, derive the prompt in
+        # x-vector-only mode (and never pass invented text) so Qwen cannot
+        # speak the reference/guidance phrase aloud before the target text.
+        cleaned = (ref_text or "").strip()
+        use_transcript = bool(cleaned)
         # Notebook cell 21 proves the filesystem-path form:
         #   create_voice_clone_prompt(ref_audio=str(reference_path), ref_text=...)
         # qwen-tts loads str paths via librosa (native sample rate, mono). Decode
@@ -155,8 +161,8 @@ class QwenBackend(InferenceBackend):
             sf.write(ref_path, wav, int(sr), format="WAV")
             prompt_items = model.create_voice_clone_prompt(
                 ref_audio=str(ref_path),
-                ref_text=ref_text,
-                x_vector_only_mode=False,
+                ref_text=cleaned if use_transcript else None,
+                x_vector_only_mode=not use_transcript,
             )
             saved = build_saved_prompt(prompt_items[0])
             return serialize_prompt(saved)
@@ -169,7 +175,7 @@ class QwenBackend(InferenceBackend):
         language: str,
         instruct: str,
         ref_audio_b64: str = "",
-        ref_text: str = "Voice cloning reference sample.",
+        ref_text: str = "",
         voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
         import torch

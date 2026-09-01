@@ -150,11 +150,12 @@ export const api = {
   ) => request<Voice>(`/api/voices/${id}/design`, { method: 'POST', body: JSON.stringify(body) }),
   approveVoice: (id: string) =>
     request<Voice>(`/api/voices/${id}/approve`, { method: 'POST' }),
-  cloneVoice: (file: File, displayName: string, language: string) => {
+  cloneVoice: (file: File, displayName: string, language: string, referenceText = '') => {
     const form = new FormData()
     form.append('file', file)
     form.append('display_name', displayName)
     form.append('language', language)
+    form.append('reference_text', referenceText)
     return request<VoiceCloneResult>('/api/voices/clone', { method: 'POST', body: form })
   },
   deleteVoice: (id: string) =>

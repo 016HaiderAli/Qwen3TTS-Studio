@@ -67,6 +67,7 @@ async def clone_voice(
     file: UploadFile = File(...),
     display_name: str = Form(...),
     language: str = Form("English"),
+    reference_text: str = Form(""),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -77,6 +78,9 @@ async def clone_voice(
         raise HTTPException(status_code=422, detail="Display name too long (max 200).")
     if language not in settings.supported_languages:
         raise HTTPException(status_code=422, detail="Unsupported language.")
+    # Optional transcript: pure embedding guidance for Qwen (never spoken).
+    # Empty stays empty — no placeholder is ever invented.
+    transcript = reference_text.strip()[:2000]
 
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in SUPPORTED_UPLOAD_SUFFIXES:
@@ -140,7 +144,8 @@ async def clone_voice(
         name=name,
         language=language,
         description="Cloned from a 3-10 s reference sample (upload).",
-        reference_text="Voice cloning reference sample.",
+        # Optional transcript (embedding guidance only; empty stays empty).
+        reference_text=transcript,
         status="approved",
         reference_audio_path=storage.voice_reference_rel(voice_id),
     )

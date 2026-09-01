@@ -59,7 +59,12 @@ export function BuiltinVoicesPage() {
   const [params] = useSearchParams()
   const requestedVoice = params.get('voice')
 
-  const [generationMode, setGenerationMode] = useState<GenerationMode>('single')
+  const [generationMode, setGenerationMode] = useState<GenerationMode>(() =>
+    // Phase 8a: the sidebar's Single/Multi items link with ?mode=; the URL only
+    // seeds the initial mode — the internal generationMode stays the source of
+    // truth for actual UI behavior afterwards.
+    params.get('mode') === 'multi' ? 'multi' : 'single',
+  )
   const [selectedSpeaker, setSelectedSpeaker] = useState(SPEAKERS[0].id)
   const [language, setLanguage] = useState('English')
   const [script, setScript] = useState('')
@@ -112,6 +117,14 @@ export function BuiltinVoicesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedVoice, customVoices.length])
 
+  // Phase 8a: ?mode=single|multi keeps the URL (sidebar sub-navigation) and the
+  // internal generationMode in sync while the page stays mounted.
+  useEffect(() => {
+    const urlMode = params.get('mode')
+    setGenerationMode(urlMode === 'multi' ? 'multi' : 'single')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.get('mode')])
+
   const isBuiltin = getSpeaker(selectedSpeaker) !== undefined
   const builtinSpeaker = getSpeaker(selectedSpeaker)
   const activeCustom = isBuiltin ? null : customVoices.find((v) => v.id === selectedSpeaker && v.status === 'approved')
@@ -145,6 +158,10 @@ export function BuiltinVoicesPage() {
           const updated = await api.getNarration(generatingId)
           setResult(updated)
           if (updated.status === 'ready' || updated.status === 'failed') {
+            // Job reached a terminal state: unlock the Generate button and
+            // sliders immediately — no page reload or "New narration" click
+            // required to start another run.
+            setGenerating(false)
             if (pollTimerRef.current !== null) {
               clearInterval(pollTimerRef.current)
               pollTimerRef.current = null
@@ -244,11 +261,26 @@ export function BuiltinVoicesPage() {
   }
 
   const reset = () => {
+    // Full "Clear output" reset: clears the audio widget AND returns the form
+    // (script, title, sliders) to its initial state, so the next run can be
+    // started immediately without a page reload.
     setResult(null)
     setGenerating(false)
     setGeneratingId(null)
     setAnnouncement('')
     announcedRef.current = false
+    setScript('')
+    setTitle('')
+    setInstruct('')
+    setSpeed(1.0)
+    setPitch(0)
+    setVol(1.0)
+    setEmotion('neutral')
+    setError('')
+  }
+
+  const clearScript = () => {
+    setScript('')
   }
 
   const handlePreset = (presetIdx: number) => {
@@ -313,14 +345,16 @@ export function BuiltinVoicesPage() {
 
       <div className="studio-layout">
         <div className="studio-form">
-          <div className="form-group">
-            <label>Voice</label>
-            <VoiceSelector
-              options={voiceOptions}
-              value={selectedSpeaker}
-              onChange={setSelectedSpeaker}
-            />
-          </div>
+          {generationMode === 'single' && (
+            <div className="form-group">
+              <label>Voice</label>
+              <VoiceSelector
+                options={voiceOptions}
+                value={selectedSpeaker}
+                onChange={setSelectedSpeaker}
+              />
+            </div>
+          )}
 
           <form onSubmit={generate}>
               <div className="form-group">
@@ -348,7 +382,9 @@ export function BuiltinVoicesPage() {
                 />
               </div>
 
-              <VoicePreviewBar name={activeName} pill={activePill} sampleSrc={activeSample} />
+              {generationMode === 'single' && (
+                <VoicePreviewBar name={activeName} pill={activePill} sampleSrc={activeSample} />
+              )}
 
               <div className="form-group">
                 <div className="script-header-row">
@@ -368,6 +404,15 @@ export function BuiltinVoicesPage() {
                       onClick={handleLoadDemo}
                     >
                       {generationMode === 'single' ? 'Load sample text' : 'Load demo dialogue'}
+                    </button>
+                    <button
+                      type="button"
+                      className="tool-btn"
+                      onClick={clearScript}
+                      disabled={script.length === 0}
+                      aria-label="Clear script text"
+                    >
+                      Clear script
                     </button>
                   </div>
                 </div>

@@ -41,11 +41,21 @@ def _login(client, email: str = "clone@example.com"):
     client.get(f"/auth/dev-login?email={email}")
 
 
-def _clone(client, wav: bytes, name: str = "My Clone", language: str = "English", fname: str = "sample.wav"):
+def _clone(
+    client,
+    wav: bytes,
+    name: str = "My Clone",
+    language: str = "English",
+    fname: str = "sample.wav",
+    transcript: str | None = None,
+):
+    data = {"display_name": name, "language": language}
+    if transcript is not None:
+        data["reference_text"] = transcript
     return client.post(
         "/api/voices/clone",
         files={"file": (fname, wav, "audio/wav")},
-        data={"display_name": name, "language": language},
+        data=data,
     )
 
 
@@ -252,6 +262,93 @@ def test_cloned_voice_zero_shot_narration_without_prompt(client):
     assert done["status"] == "ready"
     audio = client.get(f"/api/files/narrations/{done['id']}/audio")
     assert audio.status_code == 200 and audio.content[:4] == b"RIFF"
+
+
+def test_clone_zero_shot_payload_has_no_placeholder_leak(client):
+    """Phase 7A leak fix: with no saved transcript the worker payload carries
+    an EMPTY ref_text — never the placeholder phrase, which would otherwise be
+    spoken before the target narration (zero-shot reference leakage)."""
+    _login(client, email="clone-leak@example.com")
+    resp = _clone(client, make_voice_wav(3.0), name="Leak Probe")
+    assert resp.status_code == 200, resp.text
+    voice_id = resp.json()["id"]
+
+    # No transcript was provided, so none may be stored.
+    with SessionLocal() as db:
+        voice = db.get(Voice, voice_id)
+        assert voice.reference_text == ""
+
+    # Force the zero-shot path (clone_prompt job failed terminal ⇒ no prompt).
+    from app import jobs as job_service
+
+    with SessionLocal() as db:
+        job = db.query(Job).filter(Job.voice_id == voice_id, Job.type == "clone_prompt").one()
+        job_service.fail_job(db, job, "worker offline; prompt never derived")
+
+    narration = client.post(
+        "/api/narrations",
+        json={"voice_id": voice_id, "script": "This is the target narration text.", "language": "English"},
+    )
+    assert narration.status_code == 201, narration.text
+
+    # Inspect the queued narration job's payload exactly as the worker sees it.
+    with SessionLocal() as db:
+        job = (
+            db.query(Job)
+            .filter(Job.narration_id == narration.json()["id"], Job.type == "narration")
+            .one()
+        )
+        import json as _json
+
+        payload = _json.loads(job.payload_json)
+        assert "prompt_pt_b64" not in payload  # zero-shot path
+        assert payload["ref_audio_b64"]
+        # The model input must not contain the placeholder phrase anywhere.
+        assert "Voice cloning reference sample" not in _json.dumps(payload)
+        assert payload["ref_text"] == ""
+
+    # And the synthesized job completes cleanly through the mock worker.
+    assert _run_worker(client, MockBackend(), max_jobs=5) >= 1
+    done = client.get(f"/api/narrations/{narration.json()['id']}").json()
+    assert done["status"] == "ready"
+
+
+def test_clone_saves_user_transcript_and_ships_it_as_guidance(client):
+    """A user-provided transcript is stored and shipped as ref_text (guidance
+    only); without one, ref_text stays empty — never a placeholder."""
+    _login(client, email="clone-transcript@example.com")
+
+    # Without transcript → empty ref_text in the clone_prompt payload.
+    resp = _clone(client, make_voice_wav(3.0), name="No Transcript")
+    assert resp.status_code == 200, resp.text
+    voice_id = resp.json()["id"]
+    with SessionLocal() as db:
+        voice = db.get(Voice, voice_id)
+        assert voice.reference_text == ""
+        job = db.query(Job).filter(Job.voice_id == voice_id, Job.type == "clone_prompt").one()
+        import json as _json
+
+        assert _json.loads(job.payload_json)["ref_text"] == ""
+
+    # With transcript → stored and shipped verbatim.
+    resp = _clone(
+        client,
+        make_voice_wav(3.0),
+        name="With Transcript",
+        transcript="Hey everyone, welcome back to the show.",
+    )
+    assert resp.status_code == 200, resp.text
+    voice_id = resp.json()["id"]
+    with SessionLocal() as db:
+        voice = db.get(Voice, voice_id)
+        assert voice.reference_text == "Hey everyone, welcome back to the show."
+        job = db.query(Job).filter(Job.voice_id == voice_id, Job.type == "clone_prompt").one()
+        import json as _json
+
+        assert (
+            _json.loads(job.payload_json)["ref_text"]
+            == "Hey everyone, welcome back to the show."
+        )
 
 
 def test_delete_clone_voice_removes_static_copy(client):

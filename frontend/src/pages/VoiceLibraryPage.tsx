@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { CheckCircle2, X } from 'lucide-react'
 import { api, ApiError, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
@@ -75,6 +75,9 @@ function statusAnnouncement(voice: Voice, prev: string | undefined): string | nu
 }
 
 export function VoiceLibraryPage() {
+  const [params, setParams] = useSearchParams()
+  // Phase 8a: /voices?action=clone (sidebar entry) opens the clone modal.
+  const cloneActionRequested = params.get('action') === 'clone'
   const [voices, setVoices] = useState<Voice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -83,7 +86,7 @@ export function VoiceLibraryPage() {
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [highlightId, setHighlightId] = useState<string | null>(null)
-  const [cloneOpen, setCloneOpen] = useState(false)
+  const [cloneOpen, setCloneOpen] = useState(() => cloneActionRequested)
   const [clonedVoice, setClonedVoice] = useState<{ id: string; display_name: string } | null>(null)
   const [latestDesignJob, setLatestDesignJob] = useState<Record<string, { error: string | null; required_backend: 'qwen' | 'mock' }>>({})
   const announcedRef = useRef<Set<string>>(new Set())
@@ -99,6 +102,44 @@ export function VoiceLibraryPage() {
       setError(err instanceof ApiError ? err.message : 'Failed to load voices.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Phase 8a: keep the ?action=clone deep link (sidebar "Voice Cloning") in
+  // sync with the modal state. The effect below acts only on TRANSITIONS of
+  // the query param (sidebar click → 'clone'), so closing the modal can never
+  // be undone by a re-open race; the close handler cleans the URL itself.
+  const lastCloneActionRef = useRef<string | null>(null)
+  useEffect(() => {
+    const current = params.get('action')
+    const previous = lastCloneActionRef.current
+    lastCloneActionRef.current = current
+    if (current === 'clone' && previous !== 'clone') setCloneOpen(true)
+  }, [params])
+
+  const openClone = () => {
+    lastTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setCloneOpen(true)
+  }
+
+  const closeClone = () => {
+    setCloneOpen(false)
+    // Deep-link entry: clean ?action=clone back to plain /voices (batched with
+    // the close above, so the sync effect cannot re-open the modal).
+    if (params.get('action') === 'clone') {
+      const next = new URLSearchParams(params)
+      next.delete('action')
+      setParams(next, { replace: true })
+    }
+    // Focus restoration: back to the opening trigger; when the modal was
+    // opened through the sidebar deep link, focus the "Voice Cloning" item.
+    const trigger = lastTriggerRef.current
+    lastTriggerRef.current = null
+    if (trigger) {
+      trigger.focus()
+    } else {
+      document.querySelector<HTMLElement>('[data-nav="voice-cloning"]')?.focus()
     }
   }
 
@@ -234,7 +275,7 @@ export function VoiceLibraryPage() {
       <div className="page-head">
         <h2>Voice Library</h2>
         <div className="page-head-actions">
-          <button className="btn" onClick={() => setCloneOpen(true)}>
+          <button className="btn" onClick={openClone}>
             Clone voice
           </button>
           <button className="btn btn-primary" onClick={openCreate}>
@@ -284,7 +325,7 @@ export function VoiceLibraryPage() {
               clone your own from a short reference clip.
             </p>
             <div className="page-head-actions">
-              <button className="btn" onClick={() => setCloneOpen(true)}>
+              <button className="btn" onClick={openClone}>
                 Clone voice
               </button>
               <button className="btn btn-primary" onClick={openCreate}>
@@ -339,9 +380,9 @@ export function VoiceLibraryPage() {
       )}
       {cloneOpen && (
         <VoiceCloneModal
-          onClose={() => setCloneOpen(false)}
+          onClose={closeClone}
           onCloned={(result) => {
-            setCloneOpen(false)
+            closeClone()
             setClonedVoice(result)
             setAnnouncement(`Voice "${result.display_name}" cloned successfully.`)
             void load()

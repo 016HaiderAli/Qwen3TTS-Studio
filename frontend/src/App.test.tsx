@@ -87,3 +87,134 @@ describe('App — session handling', () => {
     )
   })
 })
+
+describe('App — workspace navigation shell (Phase 8a)', () => {
+  const approvedClone = {
+    id: 'cv1',
+    name: 'Senku',
+    language: 'English',
+    description: '',
+    reference_text: '',
+    status: 'approved',
+    has_approved_prompt: true,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  }
+
+  const reuseNarration = {
+    id: 'n1',
+    voice_id: 'cv1',
+    title: 'Reused',
+    script: 'Hello world',
+    delivery_direction: '',
+    language: 'English',
+    status: 'ready',
+    dialogue_speaker_count: 1,
+    dialogue_segments: [],
+    chunk_count: 1,
+    chunks_done: 1,
+    duration_sec: 2,
+    sample_rate: 24000,
+    error: null,
+    created_at: '2026-01-01T00:00:00Z',
+  }
+
+  function navFetch(url: string) {
+    if (url.endsWith('/api/me')) return jsonResponse(200, me)
+    if (url.endsWith('/api/voices')) return jsonResponse(200, [approvedClone])
+    if (url.includes('/preview')) return jsonResponse(404, {})
+    if (url.endsWith('/api/narrations/n1')) return jsonResponse(200, reuseNarration)
+    return jsonResponse(404, {})
+  }
+
+  function navEntry(name: string) {
+    return screen.getByRole('link', { name })
+  }
+
+  it('renders the workspace sidebar only when authenticated', async () => {
+    mockFetch((url) =>
+      url.endsWith('/api/me') ? jsonResponse(401, {}) : jsonResponse(404, {}),
+    )
+    renderApp()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /continue with google/i })).toBeInTheDocument(),
+    )
+    // Unauthenticated: no sidebar, no topbar.
+    expect(screen.queryByRole('navigation', { name: 'Workspace navigation' })).not.toBeInTheDocument()
+
+    mockFetch(navFetch)
+    renderApp(['/voices'])
+    await waitFor(() =>
+      expect(screen.getByRole('navigation', { name: 'Workspace navigation' })).toBeInTheDocument(),
+    )
+  })
+
+  it('exposes the simplified workspace navigation tree with correct targets', async () => {
+    mockFetch(navFetch)
+    renderApp(['/voices'])
+    await waitFor(() => expect(navEntry('Voice Design')).toBeInTheDocument())
+
+    expect(navEntry('Voice Design').getAttribute('href')).toBe('/voices')
+    expect(navEntry('Voice Cloning').getAttribute('href')).toBe('/voices?action=clone')
+    expect(navEntry('TTS Studio').getAttribute('href')).toBe('/tts-studio')
+    // Phase 8a simplification: mode sub-items and the /narration entry are
+    // removed from the sidebar — mode toggling lives inside the TTS Studio
+    // page header, and /narration stays reachable as a deep link only.
+    expect(screen.queryByRole('link', { name: 'Single Voice' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Multi-Speech' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Cloned Voice Studio' })).not.toBeInTheDocument()
+  })
+
+  it('activates TTS Studio on /tts-studio and on /narration', async () => {
+    mockFetch(navFetch)
+    const first = renderApp(['/tts-studio'])
+    await waitFor(() => expect(navEntry('TTS Studio')).toBeInTheDocument())
+    expect(navEntry('TTS Studio').getAttribute('aria-current')).toBe('page')
+    first.unmount()
+
+    renderApp(['/narration'])
+    await waitFor(() => expect(navEntry('TTS Studio')).toBeInTheDocument())
+    expect(navEntry('TTS Studio').getAttribute('aria-current')).toBe('page')
+  })
+
+  it('deactivates Voice Design while the Voice Cloning modal query is active', async () => {
+    mockFetch(navFetch)
+    const first = renderApp(['/voices'])
+    await waitFor(() => expect(navEntry('Voice Design')).toBeInTheDocument())
+    expect(navEntry('Voice Design').getAttribute('aria-current')).toBe('page')
+    expect(navEntry('Voice Cloning').getAttribute('aria-current')).toBeNull()
+    first.unmount()
+
+    renderApp(['/voices?action=clone'])
+    await waitFor(() => expect(navEntry('Voice Cloning')).toBeInTheDocument())
+    expect(navEntry('Voice Cloning').getAttribute('aria-current')).toBe('page')
+    expect(navEntry('Voice Design').getAttribute('aria-current')).toBeNull()
+  })
+
+  it('keeps the /narration?voice= and ?reuse= deep link contracts intact', async () => {
+    mockFetch(navFetch)
+    renderApp(['/narration?reuse=n1'])
+    await waitFor(() =>
+      expect((screen.getByLabelText('Script') as HTMLTextAreaElement).value).toBe('Hello world'),
+    )
+  })
+
+  it('opens the Voice Cloning modal from ?action=clone and cleans the query on close', async () => {
+    const user = userEvent.setup()
+    mockFetch(navFetch)
+    renderApp(['/voices?action=clone'])
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: /clone a voice/i })).toBeInTheDocument(),
+    )
+
+    // Sidebar reflects the cloning entry while the modal is open.
+    expect(navEntry('Voice Cloning').getAttribute('aria-current')).toBe('page')
+
+    await user.click(screen.getByRole('button', { name: 'Close voice cloning' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /clone a voice/i })).not.toBeInTheDocument(),
+    )
+    // Query cleaned up: the cloning entry is no longer active.
+    expect(navEntry('Voice Cloning').getAttribute('aria-current')).toBeNull()
+  })
+})

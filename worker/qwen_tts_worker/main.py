@@ -100,9 +100,11 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
         instruct = payload.get("instruct") or ""
         voice_setting = payload.get("voice_setting") or None
         # Zero-shot path: ref_audio_b64 is present when the voice has no
-        # pre-baked .pt yet; ref_text is the speaker's reference transcript.
+        # pre-baked .pt yet; ref_text is the speaker's reference transcript and
+        # MUST stay empty when none was saved — it is embedding-alignment
+        # guidance only, never spoken, and a placeholder would leak into output.
         ref_audio_b64 = payload.get("ref_audio_b64") or ""
-        ref_text = payload.get("ref_text") or "Voice cloning reference sample."
+        ref_text = payload.get("ref_text") or ""
         logger.info(
             "narration job %s: language=%s instruct=%r chunks=%d "
             "has_prompt=%s has_ref_audio=%s voice_setting=%r",

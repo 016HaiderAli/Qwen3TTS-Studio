@@ -43,7 +43,7 @@ class InferenceBackend(ABC):
         language: str,
         instruct: str,
         ref_audio_b64: str = "",
-        ref_text: str = "Voice cloning reference sample.",
+        ref_text: str = "",
         voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
         """Generate one WAV per chunk using the voice-clone prompt.
@@ -52,6 +52,8 @@ class InferenceBackend(ABC):
         empty/absent the worker must fall back to ``ref_audio_b64`` (zero-shot
         path) or raise a descriptive ValueError.
         ``ref_audio_b64`` — base64-encoded reference WAV for zero-shot synthesis.
+        ``ref_text`` — the reference transcript, embedding guidance only; must
+        stay empty when no transcript was saved (Qwen treats it as optional).
         """
 
     @abstractmethod
@@ -149,7 +151,7 @@ class MockBackend(InferenceBackend):
         language: str,
         instruct: str,
         ref_audio_b64: str = "",
-        ref_text: str = "Voice cloning reference sample.",
+        ref_text: str = "",
         voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
         # The mock generates deterministic synthetic audio regardless of which

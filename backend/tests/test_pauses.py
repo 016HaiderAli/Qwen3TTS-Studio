@@ -86,8 +86,10 @@ def _run_worker(client, mock: MockBackend, max_jobs: int = 10) -> int:
             # derive one from the reference audio (Phase 7A zero-shot path).
             prompt_pt_b64 = payload.get("prompt_pt_b64")
             if not prompt_pt_b64:
+                # Zero-shot: ref_text may legitimately be empty (it is optional
+                # embedding guidance and must never be a placeholder).
                 ref_audio_b64 = payload.get("ref_audio_b64") or ""
-                ref_text = payload.get("ref_text") or "Voice cloning reference sample."
+                ref_text = payload.get("ref_text") or ""
                 language = payload.get("language") or "English"
                 pt_bytes = mock.create_clone_prompt(
                     ref_audio_b64=ref_audio_b64, ref_text=ref_text, language=language,

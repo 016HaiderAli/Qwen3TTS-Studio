@@ -97,7 +97,10 @@ def narration_payload(
         "delivery_instruction": narration.delivery_direction,
         "chunks": chunks,
         "ref_audio_b64": ref_audio_b64,
-        "ref_text": getattr(voice, "reference_text", None) or "Voice cloning reference sample.",
+        # ref_text is embedding-alignment guidance ONLY (Qwen treats the
+        # transcript as optional): it must be the stored transcript or empty —
+        # never a placeholder, which would leak into the synthesized output.
+        "ref_text": voice.reference_text or "",
     }
     # Only include prompt_pt_b64 when genuinely non-empty. An absent key is the
     # unambiguous signal to the worker that the zero-shot reference-audio path

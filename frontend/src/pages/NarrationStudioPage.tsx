@@ -366,6 +366,15 @@ export function NarrationStudioPage() {
                 >
                   Load demo dialogue
                 </button>
+                <button
+                  type="button"
+                  className="tool-btn"
+                  onClick={() => setScript('')}
+                  disabled={script.length === 0}
+                  aria-label="Clear script text"
+                >
+                  Clear script
+                </button>
               </div>
             </div>
 

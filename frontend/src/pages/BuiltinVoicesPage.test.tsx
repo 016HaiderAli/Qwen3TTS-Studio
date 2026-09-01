@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { type Narration } from '../api'
 import { BuiltinVoicesPage } from './BuiltinVoicesPage'
 
 function jsonResponse(status: number, body?: unknown) {
@@ -10,24 +11,26 @@ function jsonResponse(status: number, body?: unknown) {
   })
 }
 
-function mockApi(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
+type RouteHandler = (url: string, init?: RequestInit) => Response | Promise<Response>
+
+function mockApi(handler: RouteHandler) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) =>
     Promise.resolve(handler(String(url), init)),
   )
 }
 
-const baseNarration = {
+const queuedNarration: Narration = {
   id: 'n1',
   voice_id: null,
   voice_source: 'custom_voice',
-  title: 'Built-in: Vivian',
-  script: 'Hello world',
+  title: 'My narration',
+  script: 'Hello studio',
   delivery_direction: '',
   language: 'English',
   status: 'queued',
   dialogue_speaker_count: 1,
   dialogue_segments: [],
-  chunk_count: 1,
+  chunk_count: 2,
   chunks_done: 0,
   duration_sec: null,
   sample_rate: null,
@@ -35,9 +38,9 @@ const baseNarration = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
-function renderPage() {
+function renderPage(entry = '/tts-studio') {
   return render(
-    <MemoryRouter initialEntries={['/builtin']}>
+    <MemoryRouter initialEntries={[entry]}>
       <BuiltinVoicesPage />
     </MemoryRouter>,
   )
@@ -49,85 +52,142 @@ const flushPromises = async () => {
   })
 }
 
-describe('BuiltinVoicesPage — Phase 7B controls', () => {
+const advance = async (ms: number) => {
+  await act(async () => {
+    vi.advanceTimersByTime(ms)
+  })
+  await flushPromises()
+}
+
+function fillAndSubmit(script = 'Hello studio') {
+  fireEvent.change(screen.getByLabelText(/Script \*/i), {
+    target: { value: script },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Generate narration' }))
+}
+
+describe('BuiltinVoicesPage — generate button unlocks on job completion', () => {
   beforeEach(() => {
-    mockApi((url) => {
-      if (url.endsWith('/api/voices')) return jsonResponse(200, [])
-      if (url.endsWith('/api/builtin-voices/generate')) {
-        return jsonResponse(201, baseNarration)
-      }
-      return jsonResponse(404, { detail: 'no route' })
-    })
+    vi.useFakeTimers()
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
-  it('renders Speech Rate, Pitch Shift and Volume Gain sliders', async () => {
+  it('re-enables the Generate button as soon as the job reaches a terminal state', async () => {
+    // Mutable narration state: queued while generating, ready after the poll.
+    let narration = { ...queuedNarration }
+    mockApi((url) => {
+      if (url.includes('/preview')) return jsonResponse(404, { detail: 'no preview' })
+      if (url === '/api/voices' || url.startsWith('/api/voices?')) return jsonResponse(200, [])
+      if (url === '/api/builtin-voices/generate') return jsonResponse(200, queuedNarration)
+      if (url === '/api/narrations/n1') return jsonResponse(200, narration)
+      if (url.startsWith('/api/files/')) return jsonResponse(404)
+      return jsonResponse(404)
+    })
+
     renderPage()
     await flushPromises()
-    expect(screen.getByRole('slider', { name: /speech rate/i })).toBeInTheDocument()
-    expect(screen.getByRole('slider', { name: /pitch shift/i })).toBeInTheDocument()
-    expect(screen.getByRole('slider', { name: /volume gain/i })).toBeInTheDocument()
+
+    const generateBtn = () => screen.getByRole('button', { name: /generat(e|ing)/i })
+    fillAndSubmit()
+    await flushPromises()
+    // Job queued: the button is locked while the worker processes.
+    expect(generateBtn()).toBeDisabled()
+
+    // Poll tick while still queued: stays locked.
+    await advance(2000)
+    expect(generateBtn()).toBeDisabled()
+
+    // Worker finished: the very next poll unlocks the button.
+    narration = { ...queuedNarration, status: 'ready', chunks_done: 2, duration_sec: 3.2 }
+    await advance(2000)
+    expect(screen.getByRole('button', { name: 'Generate narration' })).not.toBeDisabled()
+    // The output panel shows the finished artifact and its export controls.
+    expect(screen.getByRole('link', { name: 'Download WAV' })).toBeInTheDocument()
   })
 
-  it('renders all seven emotion preset chips and defaults to Neutral', async () => {
+  it('re-enables the button when the job fails', async () => {
+    let narration = { ...queuedNarration }
+    mockApi((url) => {
+      if (url.includes('/preview')) return jsonResponse(404, { detail: 'no preview' })
+      if (url === '/api/voices' || url.startsWith('/api/voices?')) return jsonResponse(200, [])
+      if (url === '/api/builtin-voices/generate') return jsonResponse(200, queuedNarration)
+      if (url === '/api/narrations/n1') return jsonResponse(200, narration)
+      return jsonResponse(404)
+    })
+
     renderPage()
     await flushPromises()
-    const group = screen.getByRole('group', { name: 'Emotion presets' })
-    for (const label of ['Neutral', 'Happy', 'Sad', 'Angry', 'Calm', 'Fierce', 'Whisper']) {
-      expect(
-        within(group).getByRole('button', { name: label }),
-      ).toBeInTheDocument()
-    }
-    const neutral = within(group).getByRole('button', { name: 'Neutral' })
-    expect(neutral).toHaveAttribute('aria-pressed', 'true')
+
+    fillAndSubmit()
+    await flushPromises()
+    expect(screen.getByRole('button', { name: /generating/i })).toBeDisabled()
+
+    narration = { ...queuedNarration, status: 'failed', error: 'worker exploded' }
+    await advance(2000)
+    expect(screen.getByRole('button', { name: 'Generate narration' })).not.toBeDisabled()
+    expect(screen.getByText('worker exploded')).toBeInTheDocument()
   })
 
-  it('submits voice_setting (speed/pitch/vol/emotion) and delivery_instruction', async () => {
-    const fetchSpy = mockApi((url) => {
-      if (url.endsWith('/api/voices')) return jsonResponse(200, [])
-      if (url.endsWith('/api/builtin-voices/generate')) {
-        return jsonResponse(201, baseNarration)
-      }
-      return jsonResponse(404, { detail: 'no route' })
+  it('"New narration" clears script/title and resets sliders to defaults', async () => {
+    let narration = { ...queuedNarration }
+    mockApi((url) => {
+      if (url.includes('/preview')) return jsonResponse(404, { detail: 'no preview' })
+      if (url === '/api/voices' || url.startsWith('/api/voices?')) return jsonResponse(200, [])
+      if (url === '/api/builtin-voices/generate') return jsonResponse(200, queuedNarration)
+      if (url === '/api/narrations/n1') return jsonResponse(200, narration)
+      return jsonResponse(404)
     })
+
     renderPage()
     await flushPromises()
 
-    fireEvent.change(screen.getByLabelText(/script/i), {
-      target: { value: 'A short test script.' },
-    })
-    fireEvent.change(screen.getByRole('slider', { name: /speech rate/i }), {
-      target: { value: '1.3' },
-    })
-    fireEvent.change(screen.getByRole('slider', { name: /pitch shift/i }), {
-      target: { value: '2' },
-    })
-    fireEvent.change(screen.getByRole('slider', { name: /volume gain/i }), {
-      target: { value: '1.1' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Happy' }))
-    fireEvent.change(screen.getByLabelText(/delivery direction/i), {
-      target: { value: 'Speak cheerfully.' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: /generate narration/i }))
+    const textarea = screen.getByLabelText(/Script \*/i) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'Hello studio' } })
+    fireEvent.change(screen.getByLabelText(/Title/i), { target: { value: 'My title' } })
+    // Nudge the sliders away from their defaults.
+    const rate = screen.getByLabelText(/Speech rate:/i) as HTMLInputElement
+    fireEvent.change(rate, { target: { value: '1.8' } })
+    expect(rate.value).toBe('1.8')
 
+    fillAndSubmit('Hello studio')
+    await flushPromises()
+    narration = { ...queuedNarration, status: 'ready', chunks_done: 2, duration_sec: 3.2 }
+    await advance(2000)
+
+    // The audio widget is visible (output panel in complete state)…
+    expect(screen.getByRole('link', { name: 'Download WAV' })).toBeInTheDocument()
+
+    // …and "New narration" returns the whole workspace to its initial state.
+    fireEvent.click(screen.getByRole('button', { name: /new narration/i }))
+    expect((screen.getByLabelText(/Script \*/i) as HTMLTextAreaElement).value).toBe('')
+    expect((screen.getByLabelText(/Title/i) as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText(/Speech rate:/i) as HTMLInputElement).value).toBe('1')
+    expect(
+      screen.getByText(/Your generated narration audio will appear here/i),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Generate narration' })).not.toBeDisabled()
+  })
+
+  it('"Clear script" empties the textarea', async () => {
+    mockApi((url) => {
+      if (url.includes('/preview')) return jsonResponse(404, { detail: 'no preview' })
+      if (url === '/api/voices' || url.startsWith('/api/voices?')) return jsonResponse(200, [])
+      return jsonResponse(404)
+    })
+
+    renderPage()
     await flushPromises()
 
-    const generateCall = fetchSpy.mock.calls.find(
-      (c) => String(c[0]).endsWith('/api/builtin-voices/generate'),
-    )
-    expect(generateCall).toBeTruthy()
-    const body = JSON.parse(String((generateCall![1] as RequestInit).body))
-    expect(body.delivery_instruction).toBe('Speak cheerfully.')
-    expect(body.voice_setting).toMatchObject({
-      voice_id: 'Vivian',
-      speed: 1.3,
-      pitch: 2,
-      vol: 1.1,
-      emotion: 'happy',
-    })
+    const textarea = screen.getByLabelText(/Script \*/i) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'To be cleared' } })
+    const clearBtn = screen.getByRole('button', { name: 'Clear script text' })
+    expect(clearBtn).not.toBeDisabled()
+    fireEvent.click(clearBtn)
+    expect((screen.getByLabelText(/Script \*/i) as HTMLTextAreaElement).value).toBe('')
+    expect(clearBtn).toBeDisabled()
   })
 })
