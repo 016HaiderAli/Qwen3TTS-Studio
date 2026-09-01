@@ -1,36 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Wand2, PlusCircle, Play, Pause, HelpCircle } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { Wand2, PlusCircle, HelpCircle } from 'lucide-react'
 import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
+import { ExportFormatSelector } from '../components/ExportFormatSelector'
 import { PromptGuideDrawer } from '../components/PromptGuideDrawer'
 import { StatusBadge } from '../components/StatusBadge'
+import { VoicePreviewBar } from '../components/VoicePreviewBar'
+import { VoiceSelector, type VoiceOption } from '../components/VoiceSelector'
 import { DEMO_DIALOGUE_SCRIPT, EXPRESSIVE_PRESETS, applyInstructPreset } from '../expressiveness'
-import { SPEAKERS, getSpeaker, type SpeakerInfo } from '../customVoices'
+import { SPEAKERS, getSpeaker } from '../customVoices'
 import { formatElapsed } from '../format'
 import { useInsertSpeakerTag } from '../useInsertSpeakerTag'
 
-import vivianSample from '/samples/Vivian.wav?url'
-import serenaSample from '/samples/Serena.wav?url'
-import uncleFuSample from '/samples/Uncle_Fu.wav?url'
-import dylanSample from '/samples/Dylan.wav?url'
-import ericSample from '/samples/Eric.wav?url'
-import ryanSample from '/samples/Ryan.wav?url'
-import aidenSample from '/samples/Aiden.wav?url'
-import onoAnnaSample from '/samples/Ono_Anna.wav?url'
-import soheeSample from '/samples/Sohee.wav?url'
-
-const SAMPLE_MAP: Record<string, string> = {
-  Vivian: vivianSample,
-  Serena: serenaSample,
-  Uncle_Fu: uncleFuSample,
-  Dylan: dylanSample,
-  Eric: ericSample,
-  Ryan: ryanSample,
-  Aiden: aidenSample,
-  Ono_Anna: onoAnnaSample,
-  Sohee: soheeSample,
-}
+// Phase 6B polish: every built-in speaker's preview is served by the public
+// /api/voices/{id}/preview backend endpoint (Content-Disposition: inline,
+// Accept-Ranges: bytes). URLs are strictly lower-case and RELATIVE, so the
+// requests travel through the Vite dev proxy to the FastAPI backend and stay
+// same-origin — no CORS preflight at all. The frontend fetches the bytes and
+// decodes them through Web Audio so no direct media URL or DOM audio element
+// is ever presented to a browser download manager.
+const BUILTIN_SAMPLE_URLS: Record<string, string> = Object.fromEntries(
+  SPEAKERS.map((s) => [s.id, `/api/voices/${s.id.toLowerCase()}/preview`]),
+)
 
 const LANGUAGES = [
   'Chinese',
@@ -50,71 +42,10 @@ const SINGLE_DEMO_SCRIPT =
 
 type GenerationMode = 'single' | 'multi'
 
-function SpeakerCard({
-  speaker,
-  selected,
-  onSelect,
-  isPlaying,
-  previewError,
-  onPlayToggle,
-}: {
-  speaker: SpeakerInfo
-  selected: boolean
-  onSelect: () => void
-  isPlaying: boolean
-  previewError: string | null
-  onPlayToggle: () => void
-}) {
-  const genderClass =
-    speaker.gender === 'MALE' ? 'male' : speaker.gender === 'FEMALE' ? 'female' : 'neutral'
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      className={`speaker-card ${selected ? 'selected' : ''} ${isPlaying ? 'playing' : ''}`}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect()
-        }
-      }}
-      aria-pressed={selected}
-      aria-label={`${speaker.displayName}, ${speaker.gender.toLowerCase()}, ${speaker.nativeLanguage}`}
-    >
-      <div className="speaker-card-header">
-        <div className="speaker-avatar">
-          <button
-            type="button"
-            className="preview-btn"
-            onClick={(e) => {
-              e.stopPropagation()
-              onPlayToggle()
-            }}
-            aria-label={isPlaying ? `Pause ${speaker.displayName} preview` : `Play ${speaker.displayName} preview`}
-          >
-            {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-          </button>
-        </div>
-        <div className="speaker-info">
-          <span className="speaker-name">{speaker.displayName}</span>
-          <span className="speaker-lang">{speaker.nativeLanguage}</span>
-        </div>
-      </div>
-      <div className="speaker-badges">
-        <span className={`lang-badge ${genderClass}`}>{speaker.gender}</span>
-        <span className="lang-badge neutral">{speaker.nativeLanguage.split(' ')[0]}</span>
-      </div>
-      <p className="speaker-desc">{speaker.description}</p>
-      {previewError && (
-        <p className="preview-error" role="alert">{previewError}</p>
-      )}
-    </div>
-  )
-}
-
 export function BuiltinVoicesPage() {
+  const [params] = useSearchParams()
+  const requestedVoice = params.get('voice')
+
   const [generationMode, setGenerationMode] = useState<GenerationMode>('single')
   const [selectedSpeaker, setSelectedSpeaker] = useState(SPEAKERS[0].id)
   const [language, setLanguage] = useState('English')
@@ -126,8 +57,6 @@ export function BuiltinVoicesPage() {
   const [result, setResult] = useState<Narration | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [generatingId, setGeneratingId] = useState<string | null>(null)
-  const [playingSpeakerId, setPlayingSpeakerId] = useState<string | null>(null)
-  const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({})
   const [customVoices, setCustomVoices] = useState<Voice[]>([])
   const [speed, setSpeed] = useState(1.0)
   const [pitch, setPitch] = useState(0)
@@ -135,15 +64,62 @@ export function BuiltinVoicesPage() {
   const announcedRef = useRef(false)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const scriptRef = useRef<HTMLTextAreaElement>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const speaker = getSpeaker(selectedSpeaker) ?? SPEAKERS[0]
-
-  const approvedCustomVoices = customVoices.filter((v) => v.status === 'approved')
-  const allSpeakerOptions = [
-    ...SPEAKERS.map((s) => ({ id: s.id, name: s.displayName, language: s.nativeLanguage, gender: s.gender, description: s.description, isCustom: false })),
-    ...approvedCustomVoices.map((v) => ({ id: v.name, name: v.name, language: v.language || 'English', gender: 'NEUTRAL' as const, description: v.description || '', isCustom: true })),
+  // Phase 6A: unified voice options across built-in speakers and approved
+  // custom voices. Option ids are the API identifiers (speaker id or custom
+  // voice UUID); names are display-only.
+  const voiceOptions: VoiceOption[] = [
+    ...SPEAKERS.map((s) => ({
+      kind: 'builtin' as const,
+      id: s.id,
+      name: s.displayName,
+      language: s.nativeLanguage,
+      description: s.description,
+    })),
+    ...customVoices
+      .filter((v) => v.status === 'approved')
+      .map((v) => ({
+        kind: 'custom' as const,
+        id: v.id,
+        name: v.name,
+        language: v.language || 'English',
+        description: v.description || '',
+      })),
   ]
+
+  // ?voice=<id> deep link: preselect a built-in speaker or approved custom voice.
+  useEffect(() => {
+    if (!requestedVoice) return
+    const match = voiceOptions.find(
+      (o) => o.id === requestedVoice || o.name === requestedVoice,
+    )
+    if (match) setSelectedSpeaker(match.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedVoice, customVoices.length])
+
+  const isBuiltin = getSpeaker(selectedSpeaker) !== undefined
+  const builtinSpeaker = getSpeaker(selectedSpeaker)
+  const activeCustom = isBuiltin ? null : customVoices.find((v) => v.id === selectedSpeaker && v.status === 'approved')
+  const activeName = isBuiltin ? (builtinSpeaker?.displayName ?? selectedSpeaker) : (activeCustom?.name ?? selectedSpeaker)
+  const activePill = isBuiltin
+    ? `${builtinSpeaker?.nativeLanguage ?? ''} · Built-in`
+    : `Custom · ${activeCustom?.language ?? ''}`
+  const activeSample = isBuiltin
+    ? BUILTIN_SAMPLE_URLS[selectedSpeaker] ?? null
+    : activeCustom
+      ? // Approved custom voices stream their live reference audio through the
+        // authenticated endpoint — fetched as an ArrayBuffer in the preview bar.
+        `/api/files/voices/${activeCustom.id}/reference`
+      : null
+
+  // Multi-speaker dialogue mode tag strip options: every voice can appear as
+  // a [Speaker: …] tag in the script, so the strip values are display names.
+  const allSpeakerOptions = voiceOptions.map((o) => ({
+    id: o.name,
+    name: o.name,
+    language: o.language,
+    isCustom: o.kind === 'custom',
+  }))
 
   useEffect(() => {
     if (result === null || result.status === 'queued' || result.status === 'running') {
@@ -207,15 +183,27 @@ export function BuiltinVoicesPage() {
     announcedRef.current = false
     setAnnouncement('')
     try {
-      const narration = await api.generateBuiltinVoice({
-        speaker: selectedSpeaker,
-        language,
-        script: script.trim(),
-        instruct: instruct.trim(),
-        title: title.trim(),
-        speed,
-        pitch,
-      })
+      // Phase 6A unified flow: built-in speakers use the CustomVoice endpoint;
+      // approved custom voices narrate through the cloned-voice narration API.
+      const narration = isBuiltin
+        ? await api.generateBuiltinVoice({
+            speaker: selectedSpeaker,
+            language,
+            script: script.trim(),
+            instruct: instruct.trim(),
+            title: title.trim(),
+            speed,
+            pitch,
+          })
+        : await api.createNarration({
+            voice_id: activeCustom?.id ?? '',
+            title: title.trim(),
+            script: script.trim(),
+            delivery_direction: instruct.trim(),
+            language,
+            speed,
+            pitch,
+          })
       setGeneratingId(narration.id)
       setResult(narration)
     } catch (err) {
@@ -230,50 +218,6 @@ export function BuiltinVoicesPage() {
     setGeneratingId(null)
     setAnnouncement('')
     announcedRef.current = false
-  }
-
-  const stopPreview = () => {
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current = null
-    }
-    setPlayingSpeakerId(null)
-  }
-
-  const handlePlayToggle = async (speakerId: string) => {
-    if (playingSpeakerId === speakerId) {
-      stopPreview()
-      return
-    }
-    stopPreview()
-    const speaker = getSpeaker(speakerId)
-    if (!speaker) return
-
-    setPreviewErrors((prev) => {
-      const next = { ...prev }
-      delete next[speakerId]
-      return next
-    })
-
-    const sampleUrl = SAMPLE_MAP[speakerId]
-    if (!sampleUrl) {
-      setPreviewErrors((prev) => ({ ...prev, [speakerId]: 'Sample unavailable' }))
-      return
-    }
-
-    try {
-      const audio = new Audio(sampleUrl)
-      audioRef.current = audio
-      audio.play().catch(() => {})
-      setPlayingSpeakerId(speakerId)
-      audio.onended = () => {
-        setPlayingSpeakerId(null)
-        audioRef.current = null
-      }
-    } catch (err) {
-      console.error(`[Preview Error] ${speakerId}:`, err)
-      setPreviewErrors((prev) => ({ ...prev, [speakerId]: 'Sample unavailable' }))
-    }
   }
 
   const handlePreset = (presetIdx: number) => {
@@ -330,41 +274,15 @@ export function BuiltinVoicesPage() {
       </div>
 
       <div className="studio-layout" style={{ gridTemplateColumns: '1fr' }}>
-        <div>
-          <ul className="speaker-grid" role="list">
-            {SPEAKERS.map((s) => (
-              <li key={s.id}>
-                <SpeakerCard
-                  speaker={s}
-                  selected={selectedSpeaker === s.id}
-                  onSelect={() => {
-                    setSelectedSpeaker(s.id)
-                    if (playingSpeakerId) stopPreview()
-                  }}
-                  isPlaying={playingSpeakerId === s.id}
-                  previewError={previewErrors[s.id] ?? null}
-                  onPlayToggle={() => handlePlayToggle(s.id)}
-                />
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="studio-form" style={{ marginTop: '1.5rem' }}>
-          <div className="speaker-card-header" style={{ marginBottom: '1rem' }}>
-            <div className="speaker-avatar" style={{ width: 52, height: 52 }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                <line x1="12" x2="12" y1="19" y2="22"/>
-              </svg>
-            </div>
-            <div className="speaker-info">
-              <span className="speaker-name" style={{ fontSize: '1.1rem' }}>{speaker.displayName}</span>
-              <span className="speaker-lang">{speaker.nativeLanguage} · Built-in Qwen voice</span>
-            </div>
+        <div className="studio-form">
+          <div className="form-group">
+            <label>Voice</label>
+            <VoiceSelector
+              options={voiceOptions}
+              value={selectedSpeaker}
+              onChange={setSelectedSpeaker}
+            />
           </div>
-          <p className="muted" style={{ fontSize: '0.875rem', marginBottom: '1.25rem' }}>{speaker.description}</p>
 
           {showForm ? (
             <form onSubmit={generate}>
@@ -392,6 +310,8 @@ export function BuiltinVoicesPage() {
                   maxLength={300}
                 />
               </div>
+
+              <VoicePreviewBar name={activeName} pill={activePill} sampleSrc={activeSample} />
 
               <div className="form-group">
                 <div className="script-header-row">
@@ -549,7 +469,7 @@ export function BuiltinVoicesPage() {
                 <div>
                   <h3 style={{ fontSize: '1rem', marginBottom: '0.2rem' }}>{result.title}</h3>
                   <p className="muted" style={{ fontSize: '0.8rem' }}>
-                    {speaker.displayName} · {result.language}
+                    {activeName} · {result.language}
                     {elapsed ? ` · ${elapsed}` : ''}
                   </p>
                 </div>
@@ -557,10 +477,15 @@ export function BuiltinVoicesPage() {
               </div>
 
               {result.status === 'ready' && (
-                <AudioPlayer
-                  src={`/api/files/narrations/${result.id}/audio`}
-                  title={result.title}
-                />
+                <>
+                  <AudioPlayer
+                    src={`/api/files/narrations/${result.id}/audio`}
+                    title={result.title}
+                  />
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <ExportFormatSelector narrationId={result.id} />
+                  </div>
+                </>
               )}
 
               {result.status === 'failed' && result.error && (

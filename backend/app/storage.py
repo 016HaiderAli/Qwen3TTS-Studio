@@ -150,6 +150,11 @@ def narration_final_rel(narration_id: str) -> str:
     return f"narrations/{narration_id}/final.wav"
 
 
+def narration_export_rel(narration_id: str, ext: str) -> str:
+    """Phase 5B export cache path: narrations/{id}/exports/audio.{ext}."""
+    return f"narrations/{narration_id}/exports/audio.{ext}"
+
+
 def narration_chunk_dir(narration_id: str) -> Path:
     return _root() / f"narrations/{narration_id}/chunks"
 

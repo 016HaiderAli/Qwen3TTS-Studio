@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, builtin_voices, files, internal, jobs, maintenance, narrations, voices
+from .routers import auth, builtin_voices, files, internal, jobs, maintenance, narrations, voice_previews, voices
 from .voice import ensure_builtin_voice
 
 settings = get_settings()
@@ -16,14 +16,23 @@ app = FastAPI(
     description="Voice Studio MVP - Qwen3-TTS voice design and narration web app.",
 )
 
-if settings.origin_list:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.origin_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# CORS: the frontend dev server (Vite on :5173) is always allowed so public
+# endpoints like voice previews work even when fetched by absolute URL;
+# same-origin traffic keeps working via the Vite proxy in dev and the shared
+# origin in production. Extra origins can be added via CORS_ORIGINS.
+_allowed_origins: list[str] = []
+for _origin in (settings.frontend_url, *settings.origin_list):
+    _trimmed = _origin.rstrip("/")
+    if _trimmed and _trimmed not in _allowed_origins:
+        _allowed_origins.append(_trimmed)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(Exception)
@@ -50,5 +59,7 @@ app.include_router(builtin_voices.router)
 app.include_router(narrations.router)
 app.include_router(jobs.router)
 app.include_router(files.router)
+app.include_router(files.audio_export_router)
+app.include_router(voice_previews.router)
 app.include_router(internal.router)
 app.include_router(maintenance.router)

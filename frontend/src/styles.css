@@ -1584,9 +1584,13 @@ label {
   outline-offset: 2px;
 }
 
-/* Compact speaker-tag strip (multi-speaker mode only) */
+/* Compact speaker-tag strip (multi-speaker mode only).
+   Single-row layout is intentional: label, dropdown, and Insert button stay
+   strictly on one horizontal line — no wrapping, ever. On narrow viewports
+   the select compresses (min-width: 0) instead of pushing Insert onto a
+   second line. */
 .speaker-tag-strip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.6rem;
@@ -1594,20 +1598,415 @@ label {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   margin-bottom: 0.5rem;
-  flex-wrap: wrap;
   width: fit-content;
+  max-width: 100%;
+}
+
+.speaker-tag-strip .dialogue-toolbar-label {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .speaker-tag-strip select {
   max-width: 180px;
+  min-width: 0;
+  flex: 0 1 auto;
   padding: 0.25rem 2rem 0.25rem 0.6rem;
   font-size: 0.82rem;
   background-size: 10px;
 }
 
 .speaker-tag-strip .btn {
+  flex-shrink: 0;
   padding: 0.25rem 0.6rem;
   font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* ====== Voice selector (Phase 6A) ====== */
+.voice-select {
+  position: relative;
+  width: 100%;
+}
+
+.voice-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  text-align: left;
+}
+
+.voice-select-trigger:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+.voice-select-trigger:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.voice-select-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.voice-select-trigger-icon {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.voice-select-trigger-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-select-trigger-pill {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.voice-select-chevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.voice-select-chevron.open {
+  transform: rotate(180deg);
+}
+
+.voice-select-panel {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: #161926;
+  border: 1px solid #2e344d;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.voice-select-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.voice-select-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.voice-select-search input::placeholder {
+  color: var(--muted);
+}
+
+.voice-select-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.voice-select-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.5rem 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--primary);
+}
+
+.voice-select-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  text-align: left;
+}
+
+.voice-select-option:hover:not(.disabled) {
+  background: var(--panel-3);
+}
+
+.voice-select-option.selected {
+  background: var(--accent-dim);
+}
+
+.voice-select-option.selected .voice-select-option-name {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.voice-select-option.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.voice-select-option-name {
+  font-weight: 500;
+}
+
+.voice-select-option-meta {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.voice-select-check {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.voice-select-soon-badge {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--warning);
+  background: var(--warning-dim);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+
+.voice-select-empty {
+  padding: 0.75rem 0.6rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ====== Voice preview bar (Phase 6B) ====== */
+.voice-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 1rem;
+  background: linear-gradient(135deg, var(--panel-2) 0%, var(--panel) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.voice-preview-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.voice-preview-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-preview-pill {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--accent-dim);
+  border: 1px solid rgba(20, 184, 166, 0.35);
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.voice-preview-player {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.voice-preview-play {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.voice-preview-play:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--accent-dim);
+}
+
+.voice-preview-play:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.voice-preview-play:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Real-time Web Audio equalizer (Phase 6B polish) */
+.waveform-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 42px;
+}
+
+.waveform-bar {
+  width: 4px;
+  min-height: 2px;
+  border-radius: 2px;
+  background: var(--primary);
+  opacity: 0.4;
+  transition: height 0.08s linear, opacity 0.25s ease;
+}
+
+/* Playing: full-opacity bars with high-intensity teal glow; heights are
+   driven per-frame by analyser.getByteFrequencyData() — no CSS keyframes. */
+.waveform-bars.playing .waveform-bar {
+  opacity: 1;
+  box-shadow: 0 0 12px rgba(20, 184, 166, 0.7);
+  filter: drop-shadow(0 0 6px rgba(20, 184, 166, 0.5));
+}
+
+.voice-preview-loading {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.voice-preview-error {
+  font-size: 0.72rem;
+  color: var(--danger);
+}
+
+/* ====== Export format selector (Phase 5B) ====== */
+.export-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.export-selector-options {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.export-option {
+  padding: 0.25rem 0.6rem;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.export-option:hover {
+  color: var(--text);
+}
+
+.export-option.active {
+  background: var(--primary);
+  color: #0f1117;
+}
+
+.export-option:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.export-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+}
+
+.export-download-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  box-shadow: 0 0 8px var(--primary-glow);
+}
+
+.export-download-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 /* ====== Prompt Guide Drawer ====== */

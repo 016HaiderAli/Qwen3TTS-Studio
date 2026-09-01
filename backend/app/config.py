@@ -85,6 +85,12 @@ class Settings(BaseSettings):
         "Italian",
     ]
 
+    # --- Audio post-processing (Phase 5B) ---
+    # Lead-in/lead-out dead-silence trim threshold and the integrated
+    # loudness normalization target applied to finished narrations.
+    silence_threshold_db: float = -45.0
+    loudness_target_lufs: float = -14.0
+
     # --- CORS ---
     cors_origins: str = ""  # comma-separated extra origins (empty = same-origin only)
 

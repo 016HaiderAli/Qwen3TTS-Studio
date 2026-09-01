@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api, ApiError, type NarrationListItem } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { DialogueSegmentDisplay } from '../components/DialogueSegmentDisplay'
+import { ExportFormatSelector } from '../components/ExportFormatSelector'
 import { StatusBadge } from '../components/StatusBadge'
 import { formatElapsed } from '../format'
 
@@ -182,12 +183,7 @@ export function HistoryPage() {
                       src={`/api/files/narrations/${item.id}/audio`}
                       title={item.title}
                     />
-                    <a
-                      className="btn"
-                      href={`/api/files/narrations/${item.id}/audio?download=true`}
-                    >
-                      Download
-                    </a>
+                    <ExportFormatSelector narrationId={item.id} compactLabel />
                   </div>
                 )}
                 {(item.status === 'ready' || item.status === 'failed') && (

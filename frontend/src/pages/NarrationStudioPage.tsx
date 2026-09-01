@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Wand2, HelpCircle } from 'lucide-react'
 import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
+import { ExportFormatSelector } from '../components/ExportFormatSelector'
 import { ProgressBar } from '../components/ProgressBar'
 import { PromptGuideDrawer } from '../components/PromptGuideDrawer'
 import { StatusBadge } from '../components/StatusBadge'
@@ -591,13 +592,9 @@ export function NarrationStudioPage() {
                 src={`/api/files/narrations/${narration.id}/audio`}
                 title={narration.title}
               />
-              <a
-                className="btn btn-primary"
-                href={`/api/files/narrations/${narration.id}/audio?download=true`}
-                style={{ marginTop: '0.75rem', display: 'inline-flex' }}
-              >
-                Download WAV
-              </a>
+              <div style={{ marginTop: '0.75rem' }}>
+                <ExportFormatSelector narrationId={narration.id} />
+              </div>
             </div>
           )}
 

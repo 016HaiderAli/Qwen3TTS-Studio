@@ -320,6 +320,27 @@ def complete_job(
             sr, duration = audio.concat_wav_sequence(paths, sequence, final_path)
         else:
             sr, duration = audio.concat_wav_files(existing, final_path)
+        # Phase 5B: trim dead lead-in/lead-out silence and normalize to the
+        # loudness target. User-stitched leading/trailing pauses (Phase 5C
+        # sequence edges) are preserved — only dead worker edges are trimmed.
+        leading_pause, trailing_pause = _sequence_edge_pauses(sequence)
+        try:
+            post = audio.postprocess_narration_wav(
+                final_path,
+                threshold_db=settings.silence_threshold_db,
+                target_lufs=settings.loudness_target_lufs,
+                trim_start=not leading_pause,
+                trim_end=not trailing_pause,
+            )
+            sr = post["sample_rate"]
+            duration = post["duration_sec"]
+            if post.get("gain_db"):
+                logger.info(
+                    "job %s: post-processed (gain %.1f dB, trimmed %s frames)",
+                    job.id, post["gain_db"], post["frames_trimmed"],
+                )
+        except audio.AudioError as exc:
+            logger.warning("job %s: post-processing failed (%s); serving unprocessed audio", job.id, exc)
     elif job.type == "custom_voice":
         narration = db.get(Narration, job.narration_id)
         if narration is None:
@@ -342,6 +363,29 @@ def complete_job(
                 existing,
                 final_path,
                 silence_ms=300,
+            )
+        # Phase 5B: same trim + loudness pass as narrations, preserving any
+        # user-stitched leading/trailing pause.
+        leading_pause, trailing_pause = _sequence_edge_pauses(sequence)
+        try:
+            post = audio.postprocess_narration_wav(
+                final_path,
+                threshold_db=settings.silence_threshold_db,
+                target_lufs=settings.loudness_target_lufs,
+                trim_start=not leading_pause,
+                trim_end=not trailing_pause,
+            )
+            sr = post["sample_rate"]
+            duration = post["duration_sec"]
+            if post.get("gain_db"):
+                logger.info(
+                    "custom_voice job %s: post-processed (gain %.1f dB, trimmed %s frames)",
+                    job.id, post["gain_db"], post["frames_trimmed"],
+                )
+        except audio.AudioError as exc:
+            logger.warning(
+                "custom_voice job %s: post-processing failed (%s); serving unprocessed audio",
+                job.id, exc,
             )
 
     _clear_lease(job)
@@ -491,6 +535,22 @@ def _payload_sequence(job: Job) -> list[dict] | None:
     """
     payload = json.loads(job.payload_json)
     return payload.get("sequence")
+
+
+def _sequence_edge_pauses(sequence: list[dict] | None) -> tuple[bool, bool]:
+    """Whether the Phase 5C sequence starts/ends with a user-stitched pause.
+
+    When the user explicitly placed a leading or trailing ``[Pause: ...]`` tag,
+    that silence is intentional and must survive Phase 5B edge trimming.
+    """
+    if not sequence:
+        return False, False
+    first = next((i for i in sequence if i.get("type") in ("pause", "speech")), None)
+    last = next((i for i in reversed(sequence) if i.get("type") in ("pause", "speech")), None)
+    return (
+        bool(first and first.get("type") == "pause"),
+        bool(last and last.get("type") == "pause"),
+    )
 
 
 def clear_partial_chunks(narration_id: str) -> None:

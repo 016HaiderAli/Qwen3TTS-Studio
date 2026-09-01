@@ -269,7 +269,7 @@ export function VoiceLibraryPage() {
               onDesign={() => openDesign(voice)}
               onApprove={() => void approve(voice)}
               onDelete={() => void remove(voice)}
-              onUse={() => navigate(`/narration?voice=${voice.id}`)}
+              onUse={() => navigate(`/tts-studio?voice=${voice.id}`)}
             />
           ))}
         </div>

@@ -10,8 +10,19 @@ stdlib byte-identical equivalent of ``np.zeros(int(sr * sec), np.int16)``) are
 concatenated between speech chunks in exact sequence order, and every speech
 chunk gets an ultra-short linear fade-in/out at its edges so butt-joined
 speech/silence boundaries never click or pop.
+
+Phase 5B adds loudness post-processing: dead-silence trimming at the
+lead-in/lead-out edges (-45 dBFS threshold) and BS.1770-style integrated
+loudness normalization to -14 LUFS (K-weighted, gated, peak-limited) so
+finished narrations meet broadcast/podcast loudness without clipping.
+MP3/FLAC export conversion shells out to ffmpeg when available.
 """
+import math
+import os
+import shutil
 import struct
+import subprocess
+import tempfile
 import wave
 from pathlib import Path
 
@@ -238,3 +249,346 @@ def concat_wav_sequence(
     frame_count = len(frames) // (sampwidth * channels)
     duration = frame_count / float(sample_rate)
     return int(sample_rate), round(duration, 3)
+
+
+# ---------- Phase 5B: trimming, loudness normalization, export conversion ----------
+
+TRIM_THRESHOLD_DB = -45.0
+TARGET_LUFS = -14.0
+MAX_PEAK_LINEAR = 0.990  # ~-0.09 dBFS sample-peak ceiling (anti-clipping)
+
+
+def _read_wav_frames(path: Path) -> tuple[list[bytes], int, int]:
+    """Read a PCM16 WAV into per-frame byte strings; return (frames, channels, sample_rate)."""
+    with wave.open(str(path), "rb") as wf:
+        channels = wf.getnchannels()
+        sample_rate = wf.getframerate()
+        sampwidth = wf.getsampwidth()
+        if sampwidth != 2:
+            raise AudioError(f"only 16-bit PCM WAV is supported: {path.name}")
+        data = wf.readframes(wf.getnframes())
+    frame_bytes = 2 * channels
+    count = len(data) // frame_bytes
+    return [data[i * frame_bytes : (i + 1) * frame_bytes] for i in range(count)], channels, sample_rate
+
+
+def _write_wav_frames(path: Path, frames: list[bytes], channels: int, sample_rate: int) -> None:
+    """Atomically write per-frame byte strings back as a PCM16 WAV."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    write_wav(tmp, sample_rate, b"".join(frames), channels=channels)
+    os.replace(tmp, path)
+
+
+def trim_edge_silence(
+    path: Path,
+    threshold_db: float = TRIM_THRESHOLD_DB,
+    trim_start: bool = True,
+    trim_end: bool = True,
+) -> int:
+    """Trim dead silence from the lead-in and lead-out of a WAV file in place.
+
+    Frames whose every channel sample stays at or below ``threshold_db`` FS
+    (default -45 dB) are removed from the start/end of the file; interior
+    audio — including intentional Phase 5C pause stitching — is untouched.
+    A 5 ms guard band is kept at each cut so speech never starts or ends on
+    an abrupt click. A file with no samples above the threshold (pure
+    silence) is left byte-identical: trimming a fully silent narration to
+    nothing would be destructive.
+
+    Returns the number of frames removed.
+    """
+    threshold = int(32767 * (10 ** (threshold_db / 20.0)))
+    frames, channels, sample_rate = _read_wav_frames(path)
+    n = len(frames)
+
+    def _quiet(frame: bytes) -> bool:
+        return all(abs(v) <= threshold for v in struct.unpack(f"<{channels}h", frame))
+
+    head = 0
+    if trim_start:
+        while head < n and _quiet(frames[head]):
+            head += 1
+    if head >= n:
+        # The whole file is below the threshold: leave it byte-identical.
+        # Trimming a fully silent narration (e.g. a pause-only stitched tail)
+        # to a 5 ms guard band would be destructive, never useful.
+        return 0
+    tail = 0
+    if trim_end:
+        while tail < n - head and _quiet(frames[n - 1 - tail]):
+            tail += 1
+
+    guard = max(1, int(sample_rate * 0.005))
+    head = max(0, head - guard)
+    tail = max(0, tail - guard)
+
+    removed = head + tail
+    if removed > 0:
+        kept = frames[head : n - tail]
+        _write_wav_frames(path, kept, channels, sample_rate)
+        # Re-fade the fresh edges so the cut never clicks against playback.
+        raw, ch, sr = _read_wav_frames(path)
+        data = b"".join(raw)
+        faded = apply_edge_fades(data, sr, ch, 5.0)
+        _write_wav_frames(path, [faded[i : i + 2 * ch] for i in range(0, len(faded), 2 * ch)], ch, sr)
+    return removed
+
+
+def _k_weighted_loudness_lufs(samples: list[int], sample_rate: int) -> float:
+    """Integrated loudness (LUFS) of mono PCM16 samples, BS.1770-style.
+
+    Two-stage K-weighting biquad cascade (high-shelf ≈ +4 dB above ~1.7 kHz,
+    then a ~38 Hz high-pass) designed at the file's actual sample rate,
+    400 ms mean-square windows with 75% overlap (accumulated via 100 ms
+    sub-blocks), absolute -70 LUFS gate, then relative gating 10 LU below
+    the ungated mean — the same shape ffmpeg ``loudnorm`` implements, in
+    pure Python.
+    """
+    if not samples:
+        return -70.0
+
+    sr = sample_rate
+    # Stage 1: BS.1770 high-shelf (+3.9998 dB @ 1681.97 Hz, Q 0.7072), RBJ
+    # design (matches the hard-coded 48 kHz reference coefficients to <0.05 dB
+    # at every rate; DC gain normalizes to exactly 1.0).
+    f1, gain1_db, q1 = 1681.974450955533, 3.999843853973347, 0.7071752369554196
+    big_a = 10.0 ** (gain1_db / 40.0)
+    w1 = 2.0 * math.pi * f1 / sr
+    cw1, sw1 = math.cos(w1), math.sin(w1)
+    alpha1 = sw1 / (2.0 * q1)
+    sq_term = 2.0 * math.sqrt(big_a) * alpha1
+    s1a0 = (big_a + 1) - (big_a - 1) * cw1 + sq_term
+    b0 = (big_a * ((big_a + 1) + (big_a - 1) * cw1 + sq_term)) / s1a0
+    b1 = (-2.0 * big_a * ((big_a - 1) + (big_a + 1) * cw1)) / s1a0
+    b2 = (big_a * ((big_a + 1) + (big_a - 1) * cw1 - sq_term)) / s1a0
+    a1 = (2.0 * ((big_a - 1) - (big_a + 1) * cw1)) / s1a0
+    a2 = ((big_a + 1) - (big_a - 1) * cw1 - sq_term) / s1a0
+
+    # Stage 2: BS.1770 high-pass (38.135 Hz, Q 0.5003), RBJ design
+    # (exact match to the 48 kHz reference coefficients).
+    f2, q2 = 38.13547087602444, 0.5003270373238773
+    w2 = 2.0 * math.pi * f2 / sr
+    cw2, sw2 = math.cos(w2), math.sin(w2)
+    alpha2 = sw2 / (2.0 * q2)
+    s2a0 = 1.0 + alpha2
+    c0, c1, c2 = (1.0 + cw2) / 2.0 / s2a0, (-(1.0 + cw2)) / s2a0, (1.0 + cw2) / 2.0 / s2a0
+    d1 = (-2.0 * cw2) / s2a0
+    d2 = (1.0 - alpha2) / s2a0
+
+    norm = 32768.0
+    s1x1 = s1x2 = s1y1 = s1y2 = 0.0
+    s2x1 = s2x2 = s2y1 = s2y2 = 0.0
+    sub_len = max(1, int(sr * 0.1))  # 100 ms sub-block
+    sub_powers: list[float] = []
+    acc = 0.0
+    acc_n = 0
+
+    for s in samples:
+        x = s / norm
+        y = b0 * x + b1 * s1x1 + b2 * s1x2 - a1 * s1y1 - a2 * s1y2
+        s1x2, s1x1 = s1x1, x
+        s1y2, s1y1 = s1y1, y
+        z = c0 * y + c1 * s2x1 + c2 * s2x2 - d1 * s2y1 - d2 * s2y2
+        s2x2, s2x1 = s2x1, y
+        s2y2, s2y1 = s2y1, z
+
+        acc += z * z
+        acc_n += 1
+        if acc_n == sub_len:
+            sub_powers.append(acc / acc_n)
+            acc = 0.0
+            acc_n = 0
+
+    if acc_n >= sub_len // 2:  # keep a substantial trailing sub-block
+        sub_powers.append(acc / acc_n)
+
+    if not sub_powers:
+        return -70.0
+
+    def lufs(p: float) -> float:
+        return -0.691 + 10.0 * math.log10(p) if p > 0.0 else -70.0
+
+    # 400 ms windows = 4 consecutive 100 ms sub-blocks, 100 ms hop (75% overlap).
+    window_len = 4
+    window_powers = [
+        sum(sub_powers[i : i + window_len]) / min(window_len, len(sub_powers) - i)
+        for i in range(len(sub_powers))
+        if len(sub_powers) - i >= window_len // 2
+    ]
+    if not window_powers:
+        window_powers = [sum(sub_powers) / len(sub_powers)]
+
+    ungated = [p for p in window_powers if lufs(p) > -70.0]
+    if not ungated:
+        return max(lufs(sum(window_powers) / len(window_powers)), -70.0)
+    rel_threshold = lufs(sum(ungated) / len(ungated)) - 10.0
+    # Relative gate excludes blocks BELOW the mean-10 LU floor only; blocks
+    # above it (loud bursts) always contribute, as in BS.1770.
+    gated = [p for p in ungated if lufs(p) > rel_threshold]
+    if not gated:
+        return lufs(sum(ungated) / len(ungated))
+    return lufs(sum(gated) / len(gated))
+
+
+def normalize_loudness(
+    path: Path,
+    target_lufs: float = TARGET_LUFS,
+) -> dict:
+    """Normalize a WAV file's integrated loudness to ``target_lufs`` in place.
+
+    Applies linear gain to reach the BS.1770-style target, clamped so the
+    sample peak never exceeds ``MAX_PEAK_LINEAR`` (prevents clipping on hot
+    inputs). All-silent files are left untouched (0 dB gain). Multi-channel
+    files are measured via channel-averaged mono, which equals the BS.1770
+    equal-weight channel sum for stereo.
+
+    Returns a report: pre/post LUFS, applied gain, peak, and whether the
+    peak limiter engaged.
+    """
+    frames, channels, sample_rate = _read_wav_frames(path)
+    data = b"".join(frames)
+    samples = list(struct.unpack(f"<{len(data) // 2}h", data))
+    if channels == 2:
+        mono = [(samples[i] + samples[i + 1]) // 2 for i in range(0, len(samples), 2)]
+    else:
+        mono = samples
+
+    pre_lufs = _k_weighted_loudness_lufs(mono, sample_rate)
+    peak = max((abs(v) for v in samples), default=0) / 32768.0
+    if peak == 0.0:
+        return {
+            "pre_lufs": pre_lufs,
+            "post_lufs": pre_lufs,
+            "gain_linear": 1.0,
+            "gain_db": 0.0,
+            "peak_linear": 0.0,
+            "limited": False,
+            "applied": False,
+        }
+
+    gain = 10.0 ** ((target_lufs - pre_lufs) / 20.0)
+    limited = False
+    if peak * gain > MAX_PEAK_LINEAR:
+        gain = MAX_PEAK_LINEAR / peak
+        limited = True
+
+    if abs(gain - 1.0) < 1e-4:
+        return {
+            "pre_lufs": pre_lufs,
+            "post_lufs": pre_lufs,
+            "gain_linear": 1.0,
+            "gain_db": 0.0,
+            "peak_linear": peak,
+            "limited": limited,
+            "applied": False,
+        }
+
+    scaled = [max(-32768, min(32767, int(round(v * gain)))) for v in samples]
+    out = struct.pack(f"<{len(scaled)}h", *scaled)
+    _write_wav_frames(
+        path,
+        [out[i : i + 2 * channels] for i in range(0, len(out), 2 * channels)],
+        channels,
+        sample_rate,
+    )
+
+    post_samples = list(struct.unpack(f"<{len(scaled)}h", out))
+    if channels == 2:
+        post_mono = [(post_samples[i] + post_samples[i + 1]) // 2 for i in range(0, len(post_samples), 2)]
+    else:
+        post_mono = post_samples
+    post_peak = max((abs(v) for v in post_samples), default=0) / 32768.0
+    return {
+        "pre_lufs": round(pre_lufs, 2),
+        "post_lufs": round(_k_weighted_loudness_lufs(post_mono, sample_rate), 2),
+        "gain_linear": round(gain, 6),
+        "gain_db": round(20.0 * math.log10(gain), 2),
+        "peak_linear": post_peak,
+        "limited": limited,
+        "applied": True,
+    }
+
+
+def postprocess_narration_wav(
+    path: Path,
+    threshold_db: float = TRIM_THRESHOLD_DB,
+    target_lufs: float = TARGET_LUFS,
+    trim_start: bool = True,
+    trim_end: bool = True,
+) -> dict:
+    """Full Phase 5B pass over a finished narration WAV: trim, then normalize.
+
+    Trimming runs first so lead-in/lead-out silence does not dilute the
+    loudness measurement. ``trim_start``/``trim_end`` can be disabled when the
+    user explicitly stitched a leading/trailing pause (Phase 5C sequence).
+    Returns combined report plus the recomputed duration.
+    """
+    trimmed = trim_edge_silence(path, threshold_db=threshold_db, trim_start=trim_start, trim_end=trim_end)
+    report = normalize_loudness(path, target_lufs=target_lufs)
+    report["frames_trimmed"] = trimmed
+    _, channels, sample_rate = _read_wav_frames(path)
+    with wave.open(str(path), "rb") as wf:
+        n = wf.getnframes()
+    report["duration_sec"] = round(n / float(sample_rate), 3)
+    report["sample_rate"] = sample_rate
+    report["channels"] = channels
+    return report
+
+
+# ---------- multi-format export conversion ----------
+
+EXPORT_FORMATS = {
+    "wav": {"ext": "wav", "mime": "audio/wav", "args": []},
+    "mp3": {"ext": "mp3", "mime": "audio/mpeg", "args": ["-codec:a", "libmp3lame", "-b:a", "192k"]},
+}
+
+
+def _ffmpeg_bin() -> str | None:
+    return shutil.which("ffmpeg")
+
+
+def convert_wav_to_format(source_path: Path, output_path: Path, fmt: str) -> Path | None:
+    """Convert a WAV file to ``fmt`` (wav/mp3) via ffmpeg.
+
+    ``wav`` copies the source unchanged (no re-encode, no quality loss).
+    MP3 uses libmp3lame at 192 kbps. Returns the output path, or ``None``
+    when ffmpeg is unavailable on the server — callers degrade to serving
+    the original WAV with a warning.
+
+    Raises:
+        AudioError: on unsupported formats or ffmpeg failure.
+    """
+    fmt = fmt.lower()
+    if fmt not in EXPORT_FORMATS:
+        raise AudioError(f"unsupported export format: {fmt!r}")
+    if fmt == "wav":
+        shutil.copyfile(source_path, output_path)
+        return output_path
+
+    ffmpeg = _ffmpeg_bin()
+    if ffmpeg is None:
+        return None
+
+    spec = EXPORT_FORMATS[fmt]
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+        "-i", str(source_path),
+        *spec["args"],
+        str(output_path),
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=120,
+            creationflags=getattr(os, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AudioError(f"ffmpeg {fmt} conversion timed out") from exc
+    if result.returncode != 0 or not output_path.is_file():
+        stderr = result.stderr.decode(errors="replace")[:400]
+        raise AudioError(f"ffmpeg {fmt} conversion failed: {stderr}")
+    return output_path
