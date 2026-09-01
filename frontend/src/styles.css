@@ -111,12 +111,7 @@ a:hover {
   color: var(--primary);
 }
 
-.topbar-brand {
-  border-right: none;
-  margin-right: auto;
-}
-
-/* ====== Workspace sidebar (Phase 8a) ====== */
+/* ====== Workspace sidebar (Phase 8a, collapsible) ====== */
 .app-shell {
   display: flex;
   min-height: 100vh;
@@ -133,7 +128,13 @@ a:hover {
   top: 0;
   height: 100vh;
   overflow-y: auto;
+  overflow-x: hidden;
   z-index: 20;
+  transition: width 0.2s ease;
+}
+
+.app-sidebar.collapsed {
+  width: 64px;
 }
 
 .sidebar-brand {
@@ -148,10 +149,19 @@ a:hover {
   letter-spacing: -0.02em;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: padding 0.2s ease;
+}
+
+.app-sidebar.collapsed .sidebar-brand {
+  padding: 0;
+  justify-content: center;
 }
 
 .sidebar-brand-icon {
   color: var(--primary);
+  flex-shrink: 0;
 }
 
 .sidebar-nav {
@@ -159,6 +169,7 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 1.1rem;
+  flex: 1;
 }
 
 .nav-group {
@@ -174,6 +185,16 @@ a:hover {
   letter-spacing: 0.09em;
   color: var(--muted);
   padding: 0 0.55rem 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.15s ease;
+}
+
+.app-sidebar.collapsed .nav-group-label {
+  opacity: 0;
+  height: 0.4rem;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .nav-item {
@@ -187,7 +208,8 @@ a:hover {
   font-weight: 500;
   text-decoration: none;
   border: 1px solid transparent;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    opacity 0.15s ease;
   white-space: nowrap;
 }
 
@@ -215,6 +237,44 @@ a:hover {
 .nav-label {
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: opacity 0.15s ease;
+}
+
+.app-sidebar.collapsed .nav-label {
+  opacity: 0;
+  width: 0;
+}
+
+/* Collapsed: icon-only items centered, hover reveals a tooltip via title. */
+.app-sidebar.collapsed .nav-item {
+  padding: 0.45rem 0;
+  justify-content: center;
+}
+
+.sidebar-collapse-toggle {
+  margin: 0.5rem auto 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-collapse-toggle:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .nav-parent.active {

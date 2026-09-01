@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Mic2, LogOut, Menu, User, ChevronDown, Star, MessageCircle } from 'lucide-react'
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { LogOut, Menu, User, ChevronDown, Star, MessageCircle } from 'lucide-react'
 import { api, ApiError, SESSION_EXPIRED_EVENT, type Me } from './api'
 import { LoginPage } from './pages/LoginPage'
 import { VoiceLibraryPage } from './pages/VoiceLibraryPage'
@@ -116,10 +116,9 @@ function AppShell({ me, onClearSession }: { me: Me; onClearSession: () => void }
           >
             <Menu size={18} strokeWidth={2.2} />
           </button>
-          <Link to="/voices" className="brand topbar-brand">
-            <Mic2 size={18} strokeWidth={2.5} />
-            Voice Studio
-          </Link>
+          {/* Brand title lives ONLY in the sidebar (Phase 8a follow-up: the
+              duplicate topbar logo/text was removed). The topbar keeps the
+              mobile nav toggle and the account badge on the right. */}
           <div className="topnav">
             <div className="account-dropdown" ref={dropdownRef}>
               <button

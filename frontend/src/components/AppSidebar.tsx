@@ -1,14 +1,18 @@
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Layers, Mic2, Upload, Volume2, type LucideIcon } from 'lucide-react'
+import { Layers, Mic2, Upload, Volume2, PanelLeftClose, PanelLeftOpen, type LucideIcon } from 'lucide-react'
 
 /**
- * Persistent workspace navigation (Phase 8a, simplified).
+ * Persistent workspace navigation (Phase 8a, collapsible).
  *
  * Data-driven: each entry owns its route and an `isActive` predicate evaluated
  * against the current location + query string, so active states stay exact —
  * e.g. Voice Design is NOT active while the Voice Cloning modal query param is
  * present. Mode switching (Single Voice / Multi-Speech) lives inside the TTS
  * Studio page itself and is deliberately not mirrored in the sidebar.
+ *
+ * Collapse state persists via localStorage so the user's layout preference
+ * survives reloads.
  */
 interface NavEntry {
   key: string
@@ -45,15 +49,40 @@ const NAV_ENTRIES: NavEntry[] = [
   },
 ]
 
+const COLLAPSE_KEY = 'voice-studio.sidebar.collapsed'
+
+function readCollapsedPreference(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export function AppSidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
+  const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsedPreference())
+
+  // Persist the preference; storage failures are non-fatal.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0')
+    } catch {
+      // private mode / quota — ignore
+    }
+  }, [collapsed])
+
+  const toggleCollapsed = () => setCollapsed((prev) => !prev)
 
   return (
-    <aside className={`app-sidebar ${open ? 'open' : ''}`} aria-label="Voice Studio workspace">
+    <aside
+      className={`app-sidebar ${open ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}
+      aria-label="Voice Studio workspace"
+    >
       <div className="sidebar-brand">
         <Mic2 size={17} strokeWidth={2.5} className="sidebar-brand-icon" />
-        <span>Voice Studio</span>
+        {!collapsed && <span className="sidebar-brand-text">Voice Studio</span>}
       </div>
       <nav className="sidebar-nav" aria-label="Workspace navigation">
         {NAV_ENTRIES.map((entry) => {
@@ -67,13 +96,24 @@ export function AppSidebar({ open, onNavigate }: { open: boolean; onNavigate: ()
               onClick={onNavigate}
               aria-current={active ? 'page' : undefined}
               data-nav={entry.key}
+              title={entry.label}
             >
               <Icon size={15} strokeWidth={2} className="nav-icon" />
-              <span className="nav-label">{entry.label}</span>
+              {!collapsed && <span className="nav-label">{entry.label}</span>}
             </Link>
           )
         })}
       </nav>
+      <button
+        type="button"
+        className="sidebar-collapse-toggle"
+        onClick={toggleCollapsed}
+        aria-pressed={collapsed}
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        {collapsed ? <PanelLeftOpen size={15} strokeWidth={2} /> : <PanelLeftClose size={15} strokeWidth={2} />}
+      </button>
     </aside>
   )
 }

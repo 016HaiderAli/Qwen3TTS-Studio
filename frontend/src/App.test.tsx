@@ -191,6 +191,46 @@ describe('App — workspace navigation shell (Phase 8a)', () => {
     expect(navEntry('Voice Design').getAttribute('aria-current')).toBeNull()
   })
 
+  it('renders the brand title exactly once — inside the sidebar only', async () => {
+    mockFetch(navFetch)
+    renderApp(['/voices'])
+    await waitFor(() => expect(navEntry('Voice Design')).toBeInTheDocument())
+
+    // The sidebar brand is present…
+    expect(screen.getByText('Voice Studio')).toBeInTheDocument()
+    // …and the topbar has no second brand link ("Voice Studio" link was
+    // removed from the topbar; only the sidebar renders the brand).
+    expect(screen.queryByRole('link', { name: /voice studio/i })).not.toBeInTheDocument()
+    // The account badge still lives in the topbar.
+    expect(screen.getByRole('button', { name: /alice/i })).toBeInTheDocument()
+  })
+
+  it('collapses the sidebar to icon-only mode and persists the preference', async () => {
+    const user = userEvent.setup()
+    mockFetch(navFetch)
+    renderApp(['/voices'])
+    await waitFor(() => expect(navEntry('Voice Design')).toBeInTheDocument())
+
+    const aside = screen.getByRole('complementary', { name: 'Voice Studio workspace' })
+    expect(aside).not.toHaveClass('collapsed')
+    // Labels visible while expanded.
+    expect(screen.getByText('Voice Design')).toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: 'Collapse sidebar' })
+    await user.click(toggle)
+    expect(aside).toHaveClass('collapsed')
+    expect(window.localStorage.getItem('voice-studio.sidebar.collapsed')).toBe('1')
+    // Icon-only: text labels are removed from the DOM; tooltips (title
+    // attributes) carry the names.
+    expect(screen.queryByText('Voice Design')).not.toBeInTheDocument()
+    expect(navEntry('Voice Design').getAttribute('title')).toBe('Voice Design')
+
+    await user.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+    expect(aside).not.toHaveClass('collapsed')
+    expect(window.localStorage.getItem('voice-studio.sidebar.collapsed')).toBe('0')
+    expect(screen.getByText('Voice Design')).toBeInTheDocument()
+  })
+
   it('keeps the /narration?voice= and ?reuse= deep link contracts intact', async () => {
     mockFetch(navFetch)
     renderApp(['/narration?reuse=n1'])
