@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { Wand2, PlusCircle, HelpCircle } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Wand2, PlusCircle, HelpCircle, FileAudio } from 'lucide-react'
 import { api, ApiError, type Narration, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
+import { DialogueSegmentDisplay } from '../components/DialogueSegmentDisplay'
 import { ExportFormatSelector } from '../components/ExportFormatSelector'
 import { PromptGuideDrawer } from '../components/PromptGuideDrawer'
 import { StatusBadge } from '../components/StatusBadge'
@@ -243,7 +244,14 @@ export function BuiltinVoicesPage() {
       ? formatElapsed(Date.now() - new Date(result.created_at).getTime())
       : null
 
-  const showForm = result === null || result.status === 'failed'
+  const processing =
+    result !== null && (result.status === 'queued' || result.status === 'running')
+  const finished =
+    result !== null && (result.status === 'ready' || result.status === 'failed')
+  const progressPct =
+    result !== null && result.chunk_count > 0
+      ? Math.min(100, Math.round((result.chunks_done / result.chunk_count) * 100))
+      : 6
 
   return (
     <section>
@@ -273,7 +281,7 @@ export function BuiltinVoicesPage() {
         </button>
       </div>
 
-      <div className="studio-layout" style={{ gridTemplateColumns: '1fr' }}>
+      <div className="studio-layout">
         <div className="studio-form">
           <div className="form-group">
             <label>Voice</label>
@@ -284,8 +292,7 @@ export function BuiltinVoicesPage() {
             />
           </div>
 
-          {showForm ? (
-            <form onSubmit={generate}>
+          <form onSubmit={generate}>
               <div className="form-group">
                 <label htmlFor="bv-language">Language</label>
                 <select
@@ -462,18 +469,72 @@ export function BuiltinVoicesPage() {
               <button type="submit" className="btn btn-primary btn-block" disabled={generating}>
                 {generating ? 'Generating…' : 'Generate narration'}
               </button>
-            </form>
-          ) : (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+          </form>
+        </div>
+
+        <aside className="output-panel" aria-label="Generation output">
+          {result === null && (
+            <div className="output-idle">
+              <div className="output-idle-icon">
+                <FileAudio size={24} strokeWidth={1.8} />
+              </div>
+              <p className="output-idle-title">Your generated narration audio will appear here</p>
+              <p className="muted">
+                Pick a voice, write a script, and press “Generate narration”.
+              </p>
+            </div>
+          )}
+
+          {result !== null && processing && (
+            <div className="output-processing">
+              <div className="output-panel-header">
                 <div>
-                  <h3 style={{ fontSize: '1rem', marginBottom: '0.2rem' }}>{result.title}</h3>
-                  <p className="muted" style={{ fontSize: '0.8rem' }}>
-                    {activeName} · {result.language}
-                    {elapsed ? ` · ${elapsed}` : ''}
-                  </p>
+                  <h3>Generating narration</h3>
+                  <p className="muted">{result.title} · {activeName}</p>
                 </div>
                 <StatusBadge status={result.status} />
+              </div>
+              <div
+                className="output-progress-track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={progressPct}
+                aria-label="Generation progress"
+              >
+                <div className="output-progress-bar" style={{ width: `${progressPct}%` }} />
+              </div>
+              <p className="muted output-progress-label">
+                {result.status === 'queued'
+                  ? 'Queued — waiting for the GPU worker…'
+                  : result.chunk_count > 1
+                    ? `Generating chunk ${Math.min(result.chunks_done + 1, result.chunk_count)} of ${result.chunk_count}`
+                    : 'Generating audio…'}
+                {elapsed ? ` · ${elapsed} elapsed` : ''}
+              </p>
+            </div>
+          )}
+
+          {result !== null && finished && (
+            <div className="output-result">
+              <div className="output-panel-header">
+                <div>
+                  <h3>{result.title}</h3>
+                  <p className="muted">
+                    {activeName} · {result.language}
+                    {result.status === 'ready' && result.duration_sec != null
+                      ? ` · ${result.duration_sec.toFixed(1)} s`
+                      : ''}
+                  </p>
+                </div>
+                <div className="output-panel-badges">
+                  {result.dialogue_speaker_count > 1 && (
+                    <span className="multi-speaker-badge">
+                      {result.dialogue_speaker_count}-Speaker
+                    </span>
+                  )}
+                  <StatusBadge status={result.status} />
+                </div>
               </div>
 
               {result.status === 'ready' && (
@@ -482,30 +543,45 @@ export function BuiltinVoicesPage() {
                     src={`/api/files/narrations/${result.id}/audio`}
                     title={result.title}
                   />
-                  <div style={{ marginTop: '0.75rem' }}>
+                  <div className="output-actions">
                     <ExportFormatSelector narrationId={result.id} />
+                    <button type="button" className="btn" onClick={reset}>
+                      <PlusCircle size={14} strokeWidth={2} />
+                      New narration
+                    </button>
+                  </div>
+                  <div className="output-script-block">
+                    <h4>Script</h4>
+                    {result.dialogue_speaker_count > 1 ? (
+                      <DialogueSegmentDisplay segments={result.dialogue_segments} />
+                    ) : (
+                      <p className="script-readout">{result.script}</p>
+                    )}
                   </div>
                 </>
               )}
 
-              {result.status === 'failed' && result.error && (
-                <div className="error-banner" role="alert" style={{ marginBottom: '1rem' }}>
-                  {result.error}
-                </div>
+              {result.status === 'failed' && (
+                <>
+                  {result.error && (
+                    <div className="error-banner" role="alert">
+                      {result.error}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={reset}
+                    style={{ marginTop: '1rem' }}
+                  >
+                    <PlusCircle size={14} strokeWidth={2} />
+                    Try again
+                  </button>
+                </>
               )}
-
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
-                <button type="button" className="btn" onClick={reset}>
-                  <PlusCircle size={14} strokeWidth={2} />
-                  New narration
-                </button>
-                <Link to="/history" className="btn btn-ghost">
-                  View history
-                </Link>
-              </div>
             </div>
           )}
-        </div>
+        </aside>
       </div>
 
       <PromptGuideDrawer

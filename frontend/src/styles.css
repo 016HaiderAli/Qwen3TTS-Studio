@@ -1147,85 +1147,145 @@ label {
   to { transform: rotate(360deg); }
 }
 
-/* ====== History ====== */
-.history-list {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: 0.75rem;
-}
-
-.history-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+/* ====== Generation output panel (Phase 6C) ====== */
+.output-panel {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 0.9rem 1rem;
-  flex-wrap: wrap;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.history-row:hover {
-  border-color: var(--border-bright);
   box-shadow: var(--shadow-sm);
+  padding: 1.25rem 1.35rem;
+  min-height: 480px;
+  position: sticky;
+  top: 1rem;
+  align-self: start;
 }
 
-.history-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.history-main h3 {
-  font-size: 0.95rem;
-  margin-bottom: 0.15rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history-main p {
-  font-size: 0.78rem;
+.output-idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  text-align: center;
+  min-height: 420px;
   color: var(--muted);
 }
 
-.history-actions {
+.output-idle-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--primary);
+  opacity: 0.75;
+}
+
+.output-idle-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.output-idle p {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.output-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.output-panel-header h3 {
+  font-size: 1rem;
+  margin-bottom: 0.2rem;
+  overflow-wrap: anywhere;
+}
+
+.output-panel-badges {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+/* Processing state: pulsing teal progress bar while polling job status */
+.output-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel-3);
+  overflow: hidden;
+  margin: 1rem 0 0.5rem;
+}
+
+.output-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 10px var(--primary-glow);
+  min-width: 8px;
+  transition: width 0.6s ease;
+  animation: output-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes output-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.output-progress-label {
+  font-size: 0.8rem;
+}
+
+.output-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   flex-wrap: wrap;
+  margin-top: 0.9rem;
 }
 
-.history-actions .audio-player {
-  flex: 1 1 280px;
-  min-width: 0;
-  max-width: 380px;
+.output-script-block {
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 
-.history-error-detail {
-  flex-basis: 100%;
-  width: 100%;
-  background: var(--danger-dim);
-  border: 1px solid rgba(248, 113, 113, 0.2);
-  border-left: 3px solid var(--danger);
+.output-script-block h4 {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+.script-readout {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 0.65rem 0.9rem;
-  margin-top: 0.25rem;
-}
-
-.history-error-detail p {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--danger);
-}
-
-.history-error-detail .error-banner {
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 /* ====== Studio layout ====== */
@@ -1449,6 +1509,11 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .output-panel {
+    position: static;
+    min-height: 260px;
+  }
+
   .studio-status {
     position: static;
   }
@@ -1464,19 +1529,6 @@ label {
     order: 3;
     width: 100%;
     overflow-x: auto;
-  }
-
-  .history-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .history-actions {
-    width: 100%;
-  }
-
-  .history-actions .audio-player {
-    max-width: 100%;
   }
 }
 

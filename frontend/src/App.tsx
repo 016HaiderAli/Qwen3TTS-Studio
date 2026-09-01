@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
-import { Mic2, Layers, Clock, LogOut, Wand2, User, ChevronDown, Star, MessageCircle } from 'lucide-react'
+import { Mic2, Layers, LogOut, Wand2, User, ChevronDown, Star, MessageCircle } from 'lucide-react'
 import { api, ApiError, SESSION_EXPIRED_EVENT, type Me } from './api'
 import { LoginPage } from './pages/LoginPage'
 import { VoiceLibraryPage } from './pages/VoiceLibraryPage'
 import { NarrationStudioPage } from './pages/NarrationStudioPage'
-import { HistoryPage } from './pages/HistoryPage'
 import { BuiltinVoicesPage } from './pages/BuiltinVoicesPage'
 
 export default function App() {
@@ -87,10 +86,6 @@ export default function App() {
               <Wand2 size={15} strokeWidth={2} />
               Generate Speech (TTS)
             </NavLink>
-            <NavLink to="/history">
-              <Clock size={15} strokeWidth={2} />
-              History
-            </NavLink>
           </div>
           <div className="account-dropdown" ref={dropdownRef}>
             <button
@@ -138,7 +133,6 @@ export default function App() {
           <Route path="/voices" element={<VoiceLibraryPage />} />
           <Route path="/tts-studio" element={<BuiltinVoicesPage />} />
           <Route path="/narration" element={<NarrationStudioPage />} />
-          <Route path="/history" element={<HistoryPage />} />
           <Route path="*" element={<VoiceLibraryPage />} />
         </Routes>
       </main>
