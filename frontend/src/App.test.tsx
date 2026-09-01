@@ -201,8 +201,17 @@ describe('App — workspace navigation shell (Phase 8a)', () => {
     // …and the topbar has no second brand link ("Voice Studio" link was
     // removed from the topbar; only the sidebar renders the brand).
     expect(screen.queryByRole('link', { name: /voice studio/i })).not.toBeInTheDocument()
-    // The account badge still lives in the topbar.
-    expect(screen.getByRole('button', { name: /alice/i })).toBeInTheDocument()
+    // The account badge still lives in the sidebar (exactly one).
+    expect(screen.getAllByRole('button', { name: /alice/i })).toHaveLength(1)
+  })
+
+  it('shows the worker engine status card in the sidebar footer', async () => {
+    mockFetch(navFetch)
+    renderApp(['/voices'])
+    await waitFor(() => expect(navEntry('Voice Design')).toBeInTheDocument())
+
+    expect(screen.getByText('Qwen3-TTS · Worker Ready')).toBeInTheDocument()
+    expect(screen.getByText('Engine', { exact: true })).toBeInTheDocument()
   })
 
   it('collapses the sidebar to icon-only mode and persists the preference', async () => {

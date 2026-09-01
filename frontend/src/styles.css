@@ -111,10 +111,15 @@ a:hover {
   color: var(--primary);
 }
 
-/* ====== Workspace sidebar (Phase 8a, collapsible) ====== */
+/* ====== Workspace sidebar (Phase 8a, collapsible; Phase 8 density pass) ====== */
 .app-shell {
   display: flex;
   min-height: 100vh;
+}
+
+/* Desktop: the sidebar owns all chrome — the legacy topbar is mobile-only. */
+.app-shell .topbar {
+  display: none;
 }
 
 .app-sidebar {
@@ -140,9 +145,10 @@ a:hover {
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: space-between;
+  gap: 0.4rem;
   height: 60px;
-  padding: 0 1.1rem;
+  padding: 0 0.75rem;
   font-weight: 800;
   font-size: 0.95rem;
   color: var(--text);
@@ -155,8 +161,11 @@ a:hover {
 }
 
 .app-sidebar.collapsed .sidebar-brand {
-  padding: 0;
+  flex-direction: column;
   justify-content: center;
+  gap: 0.35rem;
+  height: auto;
+  padding: 0.6rem 0;
 }
 
 .sidebar-brand-icon {
@@ -164,18 +173,43 @@ a:hover {
   flex-shrink: 0;
 }
 
+.sidebar-collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-collapse-toggle:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .sidebar-nav {
-  padding: 0.9rem 0.65rem 1.5rem;
+  padding: 0.85rem 0.6rem 0.6rem;
   display: flex;
   flex-direction: column;
-  gap: 1.1rem;
+  gap: 6px;
   flex: 1;
 }
 
 .nav-group {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 6px;
 }
 
 .nav-group-label {
@@ -184,7 +218,7 @@ a:hover {
   text-transform: uppercase;
   letter-spacing: 0.09em;
   color: var(--muted);
-  padding: 0 0.55rem 0.4rem;
+  padding: 0 14px 0.35rem;
   white-space: nowrap;
   overflow: hidden;
   transition: opacity 0.15s ease;
@@ -192,36 +226,36 @@ a:hover {
 
 .app-sidebar.collapsed .nav-group-label {
   opacity: 0;
-  height: 0.4rem;
-  padding-top: 0;
-  padding-bottom: 0;
+  height: 0.35rem;
+  padding: 0;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.45rem 0.6rem;
-  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  border-radius: 8px;
   color: var(--text-secondary);
   font-size: 0.85rem;
   font-weight: 500;
   text-decoration: none;
   border: 1px solid transparent;
+  border-left: 3px solid transparent;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
     opacity 0.15s ease;
   white-space: nowrap;
 }
 
 .nav-item:hover {
-  background: var(--panel-2);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--text);
 }
 
 .nav-item.active {
-  background: var(--accent-dim);
-  border-color: rgba(20, 184, 166, 0.3);
-  color: var(--primary);
+  background: rgba(20, 184, 166, 0.08);
+  border-left: 3px solid #10b981;
+  color: #10b981;
   font-weight: 600;
 }
 
@@ -247,61 +281,175 @@ a:hover {
 
 /* Collapsed: icon-only items centered, hover reveals a tooltip via title. */
 .app-sidebar.collapsed .nav-item {
-  padding: 0.45rem 0;
+  padding: 12px 0;
   justify-content: center;
+  border-left: none;
 }
 
-.sidebar-collapse-toggle {
-  margin: 0.5rem auto 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-
-.sidebar-collapse-toggle:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.sidebar-collapse-toggle:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
+.app-sidebar.collapsed .nav-item.active {
+  border-left: none;
+  border: 1px solid rgba(16, 185, 129, 0.45);
 }
 
 .nav-parent.active {
   color: var(--primary);
 }
 
-.nav-children {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  margin: 0.15rem 0 0.25rem 0.85rem;
-  padding-left: 0.75rem;
-  border-left: 1px solid var(--border);
+.sidebar-divider {
+  border-top: 1px solid var(--border);
+  margin: 0.4rem 0.6rem;
 }
 
-.nav-children .nav-item {
-  font-size: 0.8rem;
-  padding: 0.35rem 0.55rem;
+/* Worker status card + account block anchored at the sidebar bottom. */
+.sidebar-footer {
+  margin-top: auto;
+  padding: 0.5rem 0.6rem 0.7rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.engine-status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 9px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.engine-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
+  animation: engine-pulse 2s ease-in-out infinite;
+}
+
+.app-sidebar.collapsed .engine-dot {
+  margin: 0 auto;
+}
+
+@keyframes engine-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 2px rgba(52, 211, 153, 0.3);
+  }
+}
+
+.engine-status-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.engine-status-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--muted);
 }
 
-.nav-children .nav-item:hover {
-  color: var(--text);
+.engine-status-value {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.nav-children .nav-item.active {
+.sidebar-account {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.app-sidebar.collapsed .sidebar-account {
+  padding: 8px 0;
+  justify-content: center;
+}
+
+.sidebar-account:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
+}
+
+.sidebar-account:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.sidebar-account-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  border: 2px solid var(--primary);
   color: var(--primary);
+  flex-shrink: 0;
+}
+
+.sidebar-account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-account-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-account-hint {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.sidebar-account-chevron {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.sidebar-account-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* Collapsed sidebar: fly the profile menu out to the right of the rail. */
+.app-sidebar.collapsed .sidebar-profile-menu {
+  left: calc(100% + 10px);
+  right: auto;
+  top: auto;
+  bottom: 0;
+  position: absolute;
 }
 
 .sidebar-backdrop {
@@ -1756,9 +1904,23 @@ label {
   }
 
   /* Phase 8a: sidebar collapses to an off-canvas drawer; the topbar's
-     hamburger toggles it and content regains the full width. */
+     hamburger toggles it and content regains the full width. The mobile
+     topbar (hamburger only) is shown again, replacing the sidebar chrome. */
+  .app-shell .topbar {
+    display: flex;
+  }
+
   .sidebar-toggle {
     display: inline-flex;
+  }
+
+  .sidebar-collapse-toggle {
+    display: none; /* collapse toggle is a desktop affordance */
+  }
+
+  .sidebar-footer .engine-status,
+  .sidebar-footer .sidebar-divider {
+    display: none;
   }
 
   .app-sidebar {
