@@ -76,37 +76,6 @@ class QwenBackend(InferenceBackend):
         import torch
         from qwen_tts import Qwen3TTSModel
 
-        if self._custom_voice_model is not None:
-            return self._custom_voice_model
-        logger.info("Loading CustomVoice model %s ...", self.config.qwen_model_custom_voice)
-        self._custom_voice_model = Qwen3TTSModel.from_pretrained(
-            self.config.qwen_model_custom_voice,
-            device_map=self.config.qwen_device,
-            dtype=getattr(torch, self.config.qwen_dtype),
-        )
-        logger.info("CustomVoice model loaded")
-        return self._custom_voice_model
-
-    # ---------- model lifecycle (notebook cells 11/17/19) ----------
-    def _load_base(self):
-        import torch
-        from qwen_tts import Qwen3TTSModel
-
-        if self._base_model is not None:
-            return self._base_model
-        logger.info("Loading Base model %s ...", self.config.qwen_model_base)
-        self._base_model = Qwen3TTSModel.from_pretrained(
-            self.config.qwen_model_base,
-            device_map=self.config.qwen_device,
-            dtype=getattr(torch, self.config.qwen_dtype),
-        )
-        logger.info("Base model loaded on %s", self.config.qwen_device)
-        return self._base_model
-
-    def _load_design(self):
-        import torch
-        from qwen_tts import Qwen3TTSModel
-
         if self._design_model is not None:
             return self._design_model
         logger.info("Loading VoiceDesign model %s ...", self.config.qwen_model_design)
@@ -199,6 +168,7 @@ class QwenBackend(InferenceBackend):
         prompt_pt_b64: str,
         language: str,
         instruct: str,
+        voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
         import torch
 
@@ -207,6 +177,16 @@ class QwenBackend(InferenceBackend):
         device = next(model.model.parameters()).device
         prompt_item = restore_prompt_item(saved, device)
         prompt_list = [prompt_item]
+
+        if voice_setting:
+            logger.info(
+                "voice_setting received for narration: %s (qwen-tts==0.1.1 "
+                "`generate_voice_clone` has no speed/pitch/vol/emotion "
+                "parameters, so they are not forwarded; the settings were "
+                "already applied where the model supports them, and prosody "
+                "follows the native punctuation/paragraph path).",
+                voice_setting,
+            )
 
         if instruct and instruct.strip():
             logger.info(
@@ -242,11 +222,21 @@ class QwenBackend(InferenceBackend):
         language: str,
         instruct: str,
         dialogue_segments: list[dict] | None = None,
+        voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
         import torch
 
         model = self._load_custom_voice()
         outputs: list[SynthesisOutput] = []
+
+        if voice_setting:
+            logger.info(
+                "voice_setting received for custom_voice: %s (qwen-tts==0.1.1 "
+                "`generate_custom_voice` exposes no speed/pitch/vol/emotion "
+                "kwargs, so they are not forwarded; prosody follows the "
+                "instruct path).",
+                voice_setting,
+            )
 
         if dialogue_segments:
             for i, seg in enumerate(dialogue_segments):

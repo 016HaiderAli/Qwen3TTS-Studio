@@ -105,6 +105,90 @@ def test_create_narration_enqueues_job(client, dev_login):
     assert payload["language"] == "English"
 
 
+def test_create_narration_forwards_voice_setting(client, dev_login):
+    """Phase 7B: structured voice_setting and delivery_instruction reach the job payload."""
+    dev_login("alice@example.com")
+    me = client.get("/api/me").json()
+    voice_id = _approved_voice(me["id"])
+
+    resp = client.post(
+        "/api/narrations",
+        json={
+            "voice_id": voice_id,
+            "script": "Hello from the pipeline.",
+            "delivery_instruction": "Whisper softly.",
+            "voice_setting": {
+                "voice_id": voice_id,
+                "speed": 1.5,
+                "pitch": -3,
+                "vol": 0.8,
+                "emotion": "whisper",
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    from app.models import Job
+
+    jobs = client.get("/api/jobs").json()
+    narration_jobs = [j for j in jobs if j["type"] == "narration"]
+    with SessionLocal() as db:
+        job = db.get(Job, narration_jobs[0]["id"])
+        payload = json.loads(job.payload_json)
+    assert payload["delivery_instruction"] == "Whisper softly."
+    assert payload["instruct"] == "Whisper softly."
+    vs = payload["voice_setting"]
+    assert vs["voice_id"] == voice_id
+    assert vs["speed"] == 1.5
+    assert vs["pitch"] == -3
+    assert vs["vol"] == 0.8
+    assert vs["emotion"] == "whisper"
+
+
+def test_create_narration_voice_setting_defaults_when_absent(client, dev_login):
+    """Phase 7B: a narration without voice_setting still gets a normalized one."""
+    dev_login("alice@example.com")
+    me = client.get("/api/me").json()
+    voice_id = _approved_voice(me["id"])
+
+    resp = client.post(
+        "/api/narrations",
+        json={"voice_id": voice_id, "script": "Defaults please."},
+    )
+    assert resp.status_code == 201, resp.text
+
+    from app.models import Job
+
+    jobs = client.get("/api/jobs").json()
+    narration_jobs = [j for j in jobs if j["type"] == "narration"]
+    with SessionLocal() as db:
+        job = db.get(Job, narration_jobs[0]["id"])
+        payload = json.loads(job.payload_json)
+    vs = payload["voice_setting"]
+    assert vs["voice_id"] == voice_id
+    assert vs["speed"] == 1.0
+    assert vs["pitch"] == 0
+    assert vs["vol"] == 1.0
+    assert vs["emotion"] == "neutral"
+
+
+def test_create_narration_rejects_invalid_voice_setting(client, dev_login):
+    """Phase 7B: out-of-range voice_setting values are rejected."""
+    dev_login("alice@example.com")
+    me = client.get("/api/me").json()
+    voice_id = _approved_voice(me["id"])
+
+    resp = client.post(
+        "/api/narrations",
+        json={
+            "voice_id": voice_id,
+            "script": "Bad params.",
+            "voice_setting": {"pitch": 99},
+        },
+    )
+    assert resp.status_code == 422
+
+
 def test_narration_history_lists_voice_name(client, dev_login):
     dev_login("alice@example.com")
     me = client.get("/api/me").json()

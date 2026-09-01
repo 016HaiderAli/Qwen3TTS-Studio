@@ -108,6 +108,75 @@ def test_generate_empty_script_rejected(client, dev_login):
     assert resp.status_code == 422
 
 
+def test_generate_forwards_voice_setting_payload(client, dev_login):
+    """Phase 7B: structured voice_setting flows into the custom_voice job payload."""
+    dev_login("vs@example.com")
+    resp = client.post(
+        "/api/builtin-voices/generate",
+        json={
+            "speaker": "Vivian",
+            "language": "English",
+            "script": "Hello from the parameter pipeline.",
+            "delivery_instruction": "Speak briskly and cheerfully.",
+            "voice_setting": {
+                "voice_id": "Vivian",
+                "speed": 1.3,
+                "pitch": 2,
+                "vol": 1.1,
+                "emotion": "happy",
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    assert claim["type"] == "custom_voice"
+    payload = claim["payload"]
+    assert payload["delivery_instruction"] == "Speak briskly and cheerfully."
+    vs = payload["voice_setting"]
+    assert vs["voice_id"] == "Vivian"
+    assert vs["speed"] == 1.3
+    assert vs["pitch"] == 2
+    assert vs["vol"] == 1.1
+    assert vs["emotion"] == "happy"
+
+
+def test_generate_voice_setting_defaults_when_absent(client, dev_login):
+    """Phase 7B: a request without voice_setting still produces a normalized one."""
+    dev_login("vsdefault@example.com")
+    resp = client.post(
+        "/api/builtin-voices/generate",
+        json={
+            "speaker": "Serena",
+            "language": "English",
+            "script": "Defaults please.",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    claim = client.post("/internal/jobs/poll", headers=WORKER_AUTH).json()
+    vs = claim["payload"]["voice_setting"]
+    assert vs["voice_id"] == "Serena"
+    assert vs["speed"] == 1.0
+    assert vs["pitch"] == 0
+    assert vs["vol"] == 1.0
+    assert vs["emotion"] == "neutral"
+
+
+def test_generate_rejects_invalid_voice_setting(client, dev_login):
+    """Phase 7B: out-of-range params are rejected by Pydantic validation."""
+    dev_login("vsbad@example.com")
+    resp = client.post(
+        "/api/builtin-voices/generate",
+        json={
+            "speaker": "Vivian",
+            "language": "English",
+            "script": "Bad params.",
+            "voice_setting": {"speed": 9.9},
+        },
+    )
+    assert resp.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # Happy-path generation
 # ---------------------------------------------------------------------------

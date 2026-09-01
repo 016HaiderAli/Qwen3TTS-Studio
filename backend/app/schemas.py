@@ -1,5 +1,6 @@
 """Pydantic request/response schemas."""
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,12 +52,40 @@ class VoiceCloneResponse(BaseModel):
 
 
 # ---------- Narrations ----------
+class EmotionPreset(str, Enum):
+    neutral = "neutral"
+    happy = "happy"
+    sad = "sad"
+    angry = "angry"
+    calm = "calm"
+    fierce = "fierce"
+    whisper = "whisper"
+
+
+class VoiceSetting(BaseModel):
+    """Alibaba Model Studio voice parameters (Phase 7B).
+
+    Mirrors the model-studio ``voice_setting`` structure so the job payload and
+    the frontend controls speak one vocabulary: ``speed`` (0.5x-2.0x), ``pitch``
+    (semitone shift, -12..+12), ``vol`` (gain, 0.5x-1.5x) and an ``emotion``
+    preset. ``voice_id`` is the built-in speaker id or approved custom voice id.
+    """
+
+    voice_id: str = Field(default="", max_length=200)
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    pitch: int = Field(default=0, ge=-12, le=12)
+    vol: float = Field(default=1.0, ge=0.5, le=1.5)
+    emotion: EmotionPreset = EmotionPreset.neutral
+
+
 class NarrationCreate(BaseModel):
     voice_id: str = Field(min_length=1)
     title: str = Field(default="", max_length=300)
     script: str = Field(min_length=1)
     delivery_direction: str = Field(default="", max_length=2000)
+    delivery_instruction: str = Field(default="", max_length=2000)
     language: str = Field(default="English", max_length=50)
+    voice_setting: VoiceSetting | None = None
 
 
 class NarrationResponse(BaseModel):
@@ -151,6 +180,12 @@ class BuiltinVoiceGenerateRequest(BaseModel):
     # model's `instruct` parameter); an empty string is forwarded as
     # ``instruct=None`` to the model.
     instruct: str = Field(default="", max_length=2_000)
+    # Phase 7B alias matching the Alibaba model-studio payload vocabulary.
+    # ``delivery_instruction`` and ``voice_setting`` mirror the request bodies
+    # used by the model-studio APIs; ``instruct``/``delivery_direction`` are
+    # kept as the legacy spelling for the same values.
+    delivery_instruction: str = Field(default="", max_length=2_000)
+    voice_setting: VoiceSetting | None = None
     title: str = Field(default="", max_length=300)
     # Multi-speaker dialogue segments. When provided, ``script`` is ignored and
     # the job processes each segment independently (per-speaker TTS generation).

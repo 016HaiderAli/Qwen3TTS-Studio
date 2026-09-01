@@ -152,6 +152,12 @@ def create_narration(
     if body.language not in settings.supported_languages:
         raise HTTPException(status_code=422, detail="Unsupported language.")
 
+    # Phase 7B: delivery_instruction is the model-studio alias for the legacy
+    # delivery_direction field. Prefer the new spelling when provided.
+    delivery_instruction = (
+        body.delivery_instruction.strip() or body.delivery_direction.strip()
+    )
+
     voice = db.execute(
         select(Voice).where(Voice.id == body.voice_id, Voice.owner_id == user.id)
     ).scalar_one_or_none()
@@ -187,7 +193,7 @@ def create_narration(
         voice_id=voice.id,
         title=body.title.strip() or "Untitled narration",
         script=script,
-        delivery_direction=body.delivery_direction.strip(),
+        delivery_direction=delivery_instruction,
         language=body.language,
         status="queued",
         chunks_json=json.dumps(chunks),
@@ -196,7 +202,22 @@ def create_narration(
     db.add(narration)
     db.flush()
 
-    payload = job_service.narration_payload(narration, chunks, sequence)
+    voice_setting = (
+        body.voice_setting.model_dump() if body.voice_setting is not None else None
+    )
+    if voice_setting is None:
+        # Phase 7B: always forward a normalized voice_setting so the worker can
+        # rely on the structured params (defaults match the model-studio spec).
+        voice_setting = {
+            "voice_id": voice.id,
+            "speed": 1.0,
+            "pitch": 0,
+            "vol": 1.0,
+            "emotion": "neutral",
+        }
+    payload = job_service.narration_payload(
+        narration, chunks, sequence, voice_setting=voice_setting
+    )
     job = job_service.enqueue(
         db,
         owner_id=user.id,

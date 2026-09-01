@@ -64,29 +64,22 @@ def narration_payload(
     narration: Narration,
     chunks: list[str],
     sequence: list[dict] | None = None,
+    voice_setting: dict | None = None,
 ) -> dict:
     voice = narration.voice
+    prompt = storage.read_bytes(voice.prompt_pt_path)
     payload = {
         "voice_id": voice.id,
         "narration_id": narration.id,
         "language": narration.language,
         "instruct": narration.delivery_direction,
+        "delivery_instruction": narration.delivery_direction,
         "chunks": chunks,
+        "prompt_pt_b64": base64.b64encode(prompt).decode("ascii"),
     }
-    prompt = storage.safe_resolve(voice.prompt_pt_path)
-    if prompt is not None:
-        # Preferred path: the voice's derived clone prompt (x-vector + content
-        # prompt). Fully deterministic, worker-independent of the reference.
-        payload["prompt_pt_b64"] = base64.b64encode(prompt.read_bytes()).decode("ascii")
-    else:
-        # Phase 7A zero-shot fallback: the voice was registered approved with
-        # reference audio before its clone_prompt job landed. Ship the reference
-        # clip so the worker derives the prompt at narration time.
-        ref = storage.safe_resolve(voice.reference_audio_path)
-        if ref is None:
-            raise RuntimeError("voice has neither clone prompt nor reference audio")
-        payload["ref_audio_b64"] = base64.b64encode(ref.read_bytes()).decode("ascii")
-        payload["ref_text"] = voice.reference_text or "Voice cloning reference sample."
+    if voice_setting:
+        # Phase 7B: structured model-studio voice parameters flow to the worker.
+        payload["voice_setting"] = voice_setting
     if sequence:
         # Optional pause-aware stitching plan (Phase 5C). Unknown to older
         # workers, which simply ignore it; the backend applies it at completion.
@@ -100,6 +93,7 @@ def builtin_voice_payload(
     instruct: str,
     dialogue_segments: list[dict] | None = None,
     sequence: list[dict] | None = None,
+    voice_setting: dict | None = None,
 ) -> dict:
     """Payload for a ``custom_voice`` job (Qwen3-TTS CustomVoice).
 
@@ -122,8 +116,14 @@ def builtin_voice_payload(
         "speaker": speaker,
         "language": narration.language,
         "instruct": instruct,
+        "delivery_instruction": instruct,
         "chunks": [narration.script],
     }
+    if voice_setting:
+        # Phase 7B: the active speaker id is folded in so the worker can build
+        # the same voice_setting the frontend configured.
+        voice_setting = {**voice_setting, "voice_id": speaker}
+        payload["voice_setting"] = voice_setting
     if dialogue_segments is not None:
         payload["dialogue_segments"] = dialogue_segments
     if sequence:
@@ -428,12 +428,6 @@ def complete_job(
             storage.promote_voice_prompt(voice.id)
             voice.reference_audio_path = promoted_ref
             voice.status = "approved"
-            voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
-        elif voice.status == "approved":
-            # Phase 7A: an upload-clone voice is registered approved immediately
-            # with its reference already live; only the staged prompt needs to
-            # be promoted into the narration slot.
-            storage.promote_voice_prompt(voice.id)
             voice.prompt_pt_path = storage.voice_prompt_rel(voice.id)
     elif job.type == "narration":
         # The sample rate parsed from the actual WAV chunks is authoritative for

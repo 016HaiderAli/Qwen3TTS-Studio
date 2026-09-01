@@ -98,37 +98,17 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
             raise ValueError("narration job has no chunks")
         language = payload.get("language") or "English"
         instruct = payload.get("instruct") or ""
-        prompt_pt_b64 = payload.get("prompt_pt_b64") or ""
-        if not prompt_pt_b64:
-            # Phase 7A zero-shot path: a freshly cloned voice registered approved
-            # with reference audio before its clone_prompt job completed. Derive
-            # the clone prompt from the reference clip right now.
-            ref_audio_b64 = payload.get("ref_audio_b64") or ""
-            ref_text = payload.get("ref_text") or "Voice cloning reference sample."
-            if not ref_audio_b64:
-                raise ValueError("narration job has neither a clone prompt nor reference audio")
-            logger.info(
-                "narration job %s: deriving clone prompt from reference audio "
-                "(ref_audio_b64_len=%d)",
-                job_id, len(ref_audio_b64),
-            )
-            pt_bytes = backend.create_clone_prompt(
-                ref_audio_b64=ref_audio_b64,
-                ref_text=ref_text,
-                language=language,
-            )
-            import base64
-
-            prompt_pt_b64 = base64.b64encode(pt_bytes).decode("ascii")
+        voice_setting = payload.get("voice_setting") or None
         logger.info(
-            "narration job %s: language=%s instruct=%r chunks=%d",
-            job_id, language, instruct, len(chunks),
+            "narration job %s: language=%s instruct=%r chunks=%d voice_setting=%r",
+            job_id, language, instruct, len(chunks), voice_setting,
         )
         outputs = backend.narrate(
             chunks=chunks,
-            prompt_pt_b64=prompt_pt_b64,
+            prompt_pt_b64=payload.get("prompt_pt_b64") or "",
             language=language,
             instruct=instruct,
+            voice_setting=voice_setting,
         )
         if len(outputs) != len(chunks):
             raise RuntimeError(
@@ -155,10 +135,11 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
         language = payload.get("language") or "English"
         instruct = payload.get("instruct") or ""
         dialogue_segments = payload.get("dialogue_segments")
+        voice_setting = payload.get("voice_setting") or None
         seg_count = len(dialogue_segments) if dialogue_segments else len(chunks)
         logger.info(
-            "custom_voice job %s: speaker=%s language=%s instruct=%r segments=%d",
-            job_id, speaker, language, instruct, seg_count,
+            "custom_voice job %s: speaker=%s language=%s instruct=%r segments=%d voice_setting=%r",
+            job_id, speaker, language, instruct, seg_count, voice_setting,
         )
         outputs = backend.generate_custom_voice(
             chunks=chunks,
@@ -166,6 +147,7 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
             language=language,
             instruct=instruct,
             dialogue_segments=dialogue_segments,
+            voice_setting=voice_setting,
         )
         if len(outputs) != seg_count:
             raise RuntimeError(

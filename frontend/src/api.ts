@@ -124,6 +124,14 @@ export interface JobStatus {
   chunk_done: number
 }
 
+export interface VoiceSetting {
+  voice_id: string
+  speed: number
+  pitch: number
+  vol: number
+  emotion: string
+}
+
 export const api = {
   me: () => request<Me>('/api/me'),
 
@@ -159,9 +167,13 @@ export const api = {
     title: string
     script: string
     delivery_direction: string
+    delivery_instruction?: string
     language: string
     speed?: number
     pitch?: number
+    vol?: number
+    emotion?: string
+    voice_setting?: VoiceSetting
   }) => request<Narration>('/api/narrations', { method: 'POST', body: JSON.stringify(body) }),
   deleteNarration: (id: string) =>
     request<void>(`/api/narrations/${id}`, { method: 'DELETE' }),
@@ -195,9 +207,13 @@ export const api = {
     language: string
     script: string
     instruct: string
+    delivery_instruction?: string
     title: string
     speed?: number
     pitch?: number
+    vol?: number
+    emotion?: string
+    voice_setting?: VoiceSetting
   }) =>
     request<Narration>('/api/builtin-voices/generate', {
       method: 'POST',

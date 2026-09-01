@@ -218,6 +218,9 @@ export function NarrationStudioPage() {
         language,
         speed,
         pitch,
+        vol: 1.0,
+        emotion: 'neutral',
+        voice_setting: { voice_id: voiceId, speed, pitch, vol: 1.0, emotion: 'neutral' },
       })
       setNarration(created)
       setAnnouncement('Generation started.')
