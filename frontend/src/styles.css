@@ -1573,6 +1573,167 @@ label {
   outline-offset: 2px;
 }
 
+/* ====== Voice cloning (Phase 7A) ====== */
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.clone-success-toast {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow-md);
+  animation: toast-slide-in 0.25s ease-out;
+}
+
+.clone-success-toast span {
+  font-size: 0.85rem;
+  flex: 1;
+  min-width: 160px;
+}
+
+.clone-success-icon {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.clone-success-dismiss {
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.clone-success-dismiss:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.voice-clone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.voice-clone-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.voice-clone-head-icon {
+  color: var(--primary);
+}
+
+.voice-clone-hint {
+  font-size: 0.82rem;
+  margin-bottom: 1rem;
+}
+
+/* Drag-and-drop audio zone */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 120px;
+  padding: 1.1rem;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  margin-bottom: 1rem;
+  user-select: none;
+}
+
+.dropzone:hover,
+.dropzone:focus-visible {
+  border-color: var(--primary);
+  color: var(--text-secondary);
+}
+
+.dropzone:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.dropzone.active {
+  border-color: var(--primary);
+  border-style: solid;
+  background: var(--accent-dim);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.dropzone.has-file {
+  border-style: solid;
+  border-color: var(--border-bright);
+}
+
+.dropzone-icon {
+  color: var(--primary);
+}
+
+.dropzone-file {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Indeterminate variant of the output progress bar (clone in flight) */
+.output-progress-bar.indeterminate {
+  width: 34% !important;
+  min-width: 34%;
+  animation: output-slide 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate,
+    output-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes output-slide {
+  from {
+    margin-left: 0;
+  }
+  to {
+    margin-left: 66%;
+  }
+}
+
 /* ====== Misc utility ====== */
 .char-count {
   font-size: 0.75rem;

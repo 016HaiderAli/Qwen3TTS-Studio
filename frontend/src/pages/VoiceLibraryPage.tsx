@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { CheckCircle2, X } from 'lucide-react'
 import { api, ApiError, type Voice } from '../api'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { Spinner } from '../components/Spinner'
 import { StatusBadge } from '../components/StatusBadge'
+import { VoiceCloneModal } from '../components/VoiceCloneModal'
 import { formatElapsed } from '../format'
 
 const LANGUAGES = [
@@ -81,6 +83,8 @@ export function VoiceLibraryPage() {
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [highlightId, setHighlightId] = useState<string | null>(null)
+  const [cloneOpen, setCloneOpen] = useState(false)
+  const [clonedVoice, setClonedVoice] = useState<{ id: string; display_name: string } | null>(null)
   const [latestDesignJob, setLatestDesignJob] = useState<Record<string, { error: string | null; required_backend: 'qwen' | 'mock' }>>({})
   const announcedRef = useRef<Set<string>>(new Set())
   const prevStatusRef = useRef<Record<string, string>>({})
@@ -229,10 +233,36 @@ export function VoiceLibraryPage() {
     <section>
       <div className="page-head">
         <h2>Voice Library</h2>
-        <button className="btn btn-primary" onClick={openCreate}>
-          New voice
-        </button>
+        <div className="page-head-actions">
+          <button className="btn" onClick={() => setCloneOpen(true)}>
+            Clone voice
+          </button>
+          <button className="btn btn-primary" onClick={openCreate}>
+            New voice
+          </button>
+        </div>
       </div>
+      {clonedVoice && (
+        <div className="clone-success-toast" role="status">
+          <CheckCircle2 size={16} strokeWidth={2.4} className="clone-success-icon" />
+          <span>
+            “{clonedVoice.display_name}” was cloned and registered as an approved voice.
+          </span>
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => navigate(`/tts-studio?voice=${clonedVoice.id}`)}
+          >
+            Use in TTS Studio
+          </button>
+          <button
+            className="clone-success-dismiss"
+            onClick={() => setClonedVoice(null)}
+            aria-label="Dismiss success notification"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       <div role="status" aria-live="polite" className="sr-only">
         {announcement}
       </div>
@@ -250,11 +280,17 @@ export function VoiceLibraryPage() {
         error ? null : (
           <div className="empty-state">
             <p className="muted">
-              No voices yet. Create a voice, then generate a design preview.
+              No voices yet. Create a voice, then generate a design preview — or
+              clone your own from a short reference clip.
             </p>
-            <button className="btn btn-primary" onClick={openCreate}>
-              Create your first voice
-            </button>
+            <div className="page-head-actions">
+              <button className="btn" onClick={() => setCloneOpen(true)}>
+                Clone voice
+              </button>
+              <button className="btn btn-primary" onClick={openCreate}>
+                Create your first voice
+              </button>
+            </div>
           </div>
         )
       ) : (
@@ -299,6 +335,17 @@ export function VoiceLibraryPage() {
             closeDesign()
           }}
           onError={(msg) => setError(msg)}
+        />
+      )}
+      {cloneOpen && (
+        <VoiceCloneModal
+          onClose={() => setCloneOpen(false)}
+          onCloned={(result) => {
+            setCloneOpen(false)
+            setClonedVoice(result)
+            setAnnouncement(`Voice "${result.display_name}" cloned successfully.`)
+            void load()
+          }}
         />
       )}
     </section>

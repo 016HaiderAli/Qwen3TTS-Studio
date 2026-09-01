@@ -19,9 +19,14 @@ export const SESSION_EXPIRED_EVENT = 'session-expired'
 let expiredNotified = false
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Multipart uploads must not carry the JSON content type: fetch sets the
+  // boundary itself when the body is a FormData instance.
+  const isForm = init?.body instanceof FormData
   const resp = await fetch(path, {
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    ...(isForm
+      ? {}
+      : { headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } }),
     ...init,
   })
   if (resp.status === 401 || resp.status === 403) {
@@ -66,6 +71,12 @@ export interface Voice {
   has_approved_prompt: boolean
   created_at: string
   updated_at: string
+}
+
+export interface VoiceCloneResult {
+  id: string
+  display_name: string
+  reference_url: string
 }
 
 export interface Narration {
@@ -131,6 +142,13 @@ export const api = {
   ) => request<Voice>(`/api/voices/${id}/design`, { method: 'POST', body: JSON.stringify(body) }),
   approveVoice: (id: string) =>
     request<Voice>(`/api/voices/${id}/approve`, { method: 'POST' }),
+  cloneVoice: (file: File, displayName: string, language: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('display_name', displayName)
+    form.append('language', language)
+    return request<VoiceCloneResult>('/api/voices/clone', { method: 'POST', body: form })
+  },
   deleteVoice: (id: string) =>
     request<void>(`/api/voices/${id}`, { method: 'DELETE' }),
 

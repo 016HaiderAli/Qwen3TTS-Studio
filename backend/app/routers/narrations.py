@@ -157,10 +157,19 @@ def create_narration(
     ).scalar_one_or_none()
     if voice is None:
         raise HTTPException(status_code=404, detail="Voice not found.")
-    if not voice.prompt_pt_path:
+    # A voice may narrate through its derived clone prompt (the usual path) OR
+    # through zero-shot cloning straight from its reference audio: as long as
+    # one artifact exists the worker can synthesize. This lets a freshly
+    # uploaded cloned voice (which registers approved with reference audio
+    # before its clone_prompt job lands) generate immediately, while an
+    # approved voice that is temporarily `designing` during a redesign keeps
+    # narrating because its saved prompt remains intact.
+    has_prompt = bool(voice.prompt_pt_path) and storage.safe_resolve(voice.prompt_pt_path) is not None
+    has_reference = bool(voice.reference_audio_path) and storage.safe_resolve(voice.reference_audio_path) is not None
+    if not has_prompt and not has_reference:
         raise HTTPException(
             status_code=409,
-            detail="Voice must have an approved clone prompt before narration.",
+            detail="Voice must have an approved clone prompt or reference audio before narration.",
         )
 
     script = body.script.strip()

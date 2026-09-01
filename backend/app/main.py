@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .db import init_db
-from .routers import auth, builtin_voices, files, internal, jobs, maintenance, narrations, voice_previews, voices
+from .routers import auth, builtin_voices, files, internal, jobs, maintenance, narrations, voice_clone, voice_previews, voices
 from .voice import ensure_builtin_voice
 
 settings = get_settings()
@@ -54,6 +54,9 @@ def health() -> dict:
 
 
 app.include_router(auth.router)
+# voice_clone.router first: its literal POST /api/voices/clone must be
+# preferred over voices.router's dynamic /{voice_id} subresource routes.
+app.include_router(voice_clone.router, prefix="/api/voices", tags=["voice-clone"])
 app.include_router(voices.router)
 app.include_router(builtin_voices.router)
 app.include_router(narrations.router)

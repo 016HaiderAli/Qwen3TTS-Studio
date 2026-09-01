@@ -9,6 +9,7 @@ from ..config import get_settings
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import Job, Narration, User, Voice
+from . import voice_clone
 from ..schemas import (
     VoiceCreate,
     VoiceDesignRequest,
@@ -211,6 +212,8 @@ def delete_voice(
     db.delete(voice)
     db.commit()
     storage.remove_voice_artifacts(voice_id)
+    # Phase 7A: drop the canonical app-static clone copy too (best-effort).
+    voice_clone.remove_clone_static_copy(voice_id)
     for narration_id in narration_ids:
         storage.remove_narration_artifacts(narration_id)
     response.status_code = status.HTTP_204_NO_CONTENT

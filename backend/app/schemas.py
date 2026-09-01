@@ -42,6 +42,14 @@ class VoiceResponse(BaseModel):
     updated_at: datetime
 
 
+class VoiceCloneResponse(BaseModel):
+    """Phase 7A: response of the upload-and-clone voice endpoint."""
+
+    id: str
+    display_name: str
+    reference_url: str
+
+
 # ---------- Narrations ----------
 class NarrationCreate(BaseModel):
     voice_id: str = Field(min_length=1)

@@ -82,9 +82,22 @@ def _run_worker(client, mock: MockBackend, max_jobs: int = 10) -> int:
             _upload(client, claim, "prompt_pt", pt)
             _complete(client, claim)
         elif claim["type"] == "narration":
+            # Mirror the real worker logic: if the payload has no clone prompt,
+            # derive one from the reference audio (Phase 7A zero-shot path).
+            prompt_pt_b64 = payload.get("prompt_pt_b64")
+            if not prompt_pt_b64:
+                ref_audio_b64 = payload.get("ref_audio_b64") or ""
+                ref_text = payload.get("ref_text") or "Voice cloning reference sample."
+                language = payload.get("language") or "English"
+                pt_bytes = mock.create_clone_prompt(
+                    ref_audio_b64=ref_audio_b64, ref_text=ref_text, language=language,
+                )
+                import base64
+
+                prompt_pt_b64 = base64.b64encode(pt_bytes).decode("ascii")
             outputs = mock.narrate(
                 chunks=payload["chunks"],
-                prompt_pt_b64=payload["prompt_pt_b64"],
+                prompt_pt_b64=prompt_pt_b64,
                 language=payload["language"],
                 instruct=payload["instruct"],
             )

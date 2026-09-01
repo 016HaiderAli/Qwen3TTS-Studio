@@ -592,3 +592,82 @@ def convert_wav_to_format(source_path: Path, output_path: Path, fmt: str) -> Pat
         stderr = result.stderr.decode(errors="replace")[:400]
         raise AudioError(f"ffmpeg {fmt} conversion failed: {stderr}")
     return output_path
+
+
+# ---------- Phase 7A: voice-clone upload decoding ----------
+
+CLONE_MIN_SECONDS = 2.0
+CLONE_MAX_SECONDS = 30.0
+REFERENCE_TARGET_RATE = 24000
+
+
+def decode_upload_to_reference_wav(data: bytes, suffix: str, out_path: Path) -> float:
+    """Decode uploaded browser audio into 24 kHz mono PCM16 WAV at ``out_path``.
+
+    Accepts WAV/MP3/OGG/M4A bytes (anything ffmpeg can read): ffmpeg downmixes
+    to mono and resamples to ``REFERENCE_TARGET_RATE`` in one pass. Without
+    ffmpeg, plain 16-bit PCM WAV uploads are still supported via the stdlib
+    ``wave`` module (stereo is averaged down to mono).
+
+    Returns the input duration in seconds, measured on the converted file
+    *before* any silence trimming, so callers can validate length.
+    """
+    if not data:
+        raise AudioError("uploaded audio file is empty")
+
+    ext = (suffix or "").lower()
+    if ext and not ext.startswith("."):
+        ext = "." + ext
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ffmpeg = _ffmpeg_bin()
+    if ffmpeg is not None:
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / f"upload{ext or '.bin'}"
+            src.write_bytes(data)
+            out_path.write_bytes(b"")  # ensure writable target dir semantics
+            result = subprocess.run(
+                [
+                    ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                    "-i", str(src),
+                    "-vn", "-ac", "1",
+                    "-ar", str(REFERENCE_TARGET_RATE),
+                    "-sample_fmt", "s16",
+                    str(out_path),
+                ],
+                capture_output=True,
+                timeout=120,
+                creationflags=getattr(os, "CREATE_NO_WINDOW", 0),
+            )
+        if result.returncode != 0 or not out_path.is_file() or out_path.stat().st_size == 0:
+            stderr = result.stderr.decode(errors="replace")[:400]
+            raise AudioError(f"could not decode uploaded audio: {stderr}")
+        return _wav_duration(out_path)
+
+    # ffmpeg-less fallback: stdlib-only for 16-bit PCM WAV uploads.
+    try:
+        info = read_wav_bytes(data)
+    except Exception as exc:  # noqa: BLE001 - wave.Error & friends
+        raise AudioError(
+            "this server cannot decode compressed audio (ffmpeg not installed); "
+            "please upload a 16-bit PCM WAV file"
+        ) from exc
+    channels, sampwidth, framerate, _frames = info
+    if sampwidth != 2:
+        raise AudioError("upload fallback requires 16-bit PCM WAV (ffmpeg not installed)")
+    with wave.open(__import__("io").BytesIO(data), "rb") as wf:
+        frames = wf.readframes(wf.getnframes())
+    if channels > 1:
+        samples = struct.unpack(f"<{len(frames) // 2}h", frames)
+        mono = [
+            max(-32768, min(32767, sum(samples[i : i + channels]) // channels))
+            for i in range(0, len(samples), channels)
+        ]
+        frames = struct.pack(f"<{len(mono)}h", *mono)
+    write_wav(out_path, framerate, frames, channels=1)
+    return _wav_duration(out_path)
+
+
+def _wav_duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as wf:
+        return wf.getnframes() / float(wf.getframerate())
