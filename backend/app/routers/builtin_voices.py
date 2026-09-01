@@ -14,6 +14,7 @@ from ..models import Narration, User
 from ..schemas import (
     BuiltinVoiceGenerateRequest,
     BuiltinVoiceInfo,
+    DialogueSegmentPayload,
     NarrationResponse,
 )
 from ..voice import get_builtin_voice_id
@@ -124,7 +125,20 @@ def generate_builtin_voice(
         raise HTTPException(status_code=400, detail=f"Unknown speaker: {body.speaker!r}")
 
     speaker_info = get_speaker(body.speaker)
-    instruct = body.instruct.strip()
+    instruct = (body.delivery_instruction.strip() or body.instruct.strip())
+    voice_setting = (
+        body.voice_setting.model_dump() if body.voice_setting is not None else None
+    )
+    if voice_setting is None:
+        # Phase 7B: always forward a normalized voice_setting so the worker can
+        # rely on the structured params (defaults match the model-studio spec).
+        voice_setting = {
+            "voice_id": body.speaker,
+            "speed": 1.0,
+            "pitch": 0,
+            "vol": 1.0,
+            "emotion": "neutral",
+        }
     dialogue_segments: list[dict] | None = None
     sequence: list[dict] | None = None
 
@@ -202,6 +216,7 @@ def generate_builtin_voice(
         instruct=instruct,
         dialogue_segments=dialogue_segments,
         sequence=sequence,
+        voice_setting=voice_setting,
     )
     job_service.enqueue(
         db,

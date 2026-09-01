@@ -42,6 +42,7 @@ class InferenceBackend(ABC):
         prompt_pt_b64: str,
         language: str,
         instruct: str,
+        voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
         """Generate one WAV per chunk using the voice-clone prompt."""
 
@@ -54,6 +55,7 @@ class InferenceBackend(ABC):
         language: str,
         instruct: str,
         dialogue_segments: list[dict] | None = None,
+        voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
         """Generate one WAV per chunk (single-speaker) or per segment (dialogue)."""
 
@@ -86,13 +88,30 @@ class MockBackend(InferenceBackend):
     def __init__(self, sample_rate: int = 24000):
         self.sample_rate = sample_rate
 
-    def _tone(self, seed: int, duration_sec: float, base_freq: float = 220.0) -> SynthesisOutput:
+    @staticmethod
+    def _setting(voice_setting: dict | None, key: str, default):
+        if not voice_setting:
+            return default
+        return voice_setting.get(key, default)
+
+    def _tone(
+        self,
+        seed: int,
+        duration_sec: float,
+        base_freq: float = 220.0,
+        vol: float = 1.0,
+        pitch_st: int = 0,
+    ) -> SynthesisOutput:
         sr = self.sample_rate
+        # Phase 7B: semitone shift multiplies the base frequency; volume scales
+        # amplitude; speed shortens the clip (encoded by the caller in the
+        # requested duration).
+        freq_factor = 2 ** (pitch_st / 12.0)
         n = int(sr * duration_sec)
         # Two overlapping sines: pitch encodes seed (incl. delivery direction);
         # amplitude envelope avoids clicks.
-        f1 = base_freq + (seed % 400)
-        f2 = base_freq * 1.5 + (seed % 137)
+        f1 = (base_freq + (seed % 400)) * freq_factor
+        f2 = (base_freq * 1.5 + (seed % 137)) * freq_factor
         samples = []
         for i in range(n):
             t = i / sr
@@ -100,7 +119,7 @@ class MockBackend(InferenceBackend):
             v = 0.35 * math.sin(2 * math.pi * f1 * t) + 0.25 * math.sin(
                 2 * math.pi * f2 * t
             )
-            samples.append(max(-1.0, min(1.0, v * max(0.0, env))))
+            samples.append(max(-1.0, min(1.0, v * max(0.0, env)) * vol))
         return SynthesisOutput(make_wav(sr, samples), sr, duration_sec)
 
     def design(self, *, language: str, instruct: str, text: str) -> SynthesisOutput:
@@ -121,14 +140,24 @@ class MockBackend(InferenceBackend):
         prompt_pt_b64: str,
         language: str,
         instruct: str,
+        voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
+        speed = float(self._setting(voice_setting, "speed", 1.0))
+        vol = float(self._setting(voice_setting, "vol", 1.0))
+        pitch_st = int(self._setting(voice_setting, "pitch", 0))
+        emotion = self._setting(voice_setting, "emotion", "neutral")
         outputs = []
         for i, chunk in enumerate(chunks):
-            seed = _hash_int("narration", str(i), chunk, instruct, language, prompt_pt_b64[:64])
+            seed = _hash_int(
+                "narration", str(i), chunk, instruct, emotion, language, prompt_pt_b64[:64]
+            )
             base_dur = 1.2 + (len(chunk.split()) / 80.0) * 2.4
             if "\n\n" in chunk:
                 base_dur += 0.4
-            outputs.append(self._tone(seed, base_dur, base_freq=220.0 + i * 25))
+            base_dur = base_dur / max(speed, 0.1)
+            outputs.append(
+                self._tone(seed, base_dur, base_freq=220.0 + i * 25, vol=vol, pitch_st=pitch_st)
+            )
         return outputs
 
     def generate_custom_voice(
@@ -139,7 +168,12 @@ class MockBackend(InferenceBackend):
         language: str,
         instruct: str,
         dialogue_segments: list[dict] | None = None,
+        voice_setting: dict | None = None,
     ) -> list[SynthesisOutput]:
+        speed = float(self._setting(voice_setting, "speed", 1.0))
+        vol = float(self._setting(voice_setting, "vol", 1.0))
+        pitch_st = int(self._setting(voice_setting, "pitch", 0))
+        emotion = self._setting(voice_setting, "emotion", "neutral")
         outputs = []
         if dialogue_segments:
             for i, seg in enumerate(dialogue_segments):
@@ -147,17 +181,29 @@ class MockBackend(InferenceBackend):
                 seg_text = seg.get("text", "")
                 seg_instruct = seg.get("instruct", "")
                 seed = _hash_int(
-                    "dialogue", seg_speaker, str(i), seg_text, seg_instruct, language,
+                    "dialogue", seg_speaker, str(i), seg_text, seg_instruct, emotion, language,
                 )
                 base_dur = 1.2 + (len(seg_text.split()) / 80.0) * 2.4
                 if "\n\n" in seg_text:
                     base_dur += 0.4
-                outputs.append(self._tone(seed, base_dur, base_freq=180.0 + i * 15))
+                base_dur = base_dur / max(speed, 0.1)
+                outputs.append(
+                    self._tone(
+                        seed, base_dur, base_freq=180.0 + i * 15, vol=vol, pitch_st=pitch_st
+                    )
+                )
         else:
             for i, chunk in enumerate(chunks):
-                seed = _hash_int("custom_voice", speaker, str(i), chunk, instruct, language)
+                seed = _hash_int(
+                    "custom_voice", speaker, str(i), chunk, instruct, emotion, language
+                )
                 base_dur = 1.2 + (len(chunk.split()) / 80.0) * 2.4
                 if "\n\n" in chunk:
                     base_dur += 0.4
-                outputs.append(self._tone(seed, base_dur, base_freq=180.0 + i * 15))
+                base_dur = base_dur / max(speed, 0.1)
+                outputs.append(
+                    self._tone(
+                        seed, base_dur, base_freq=180.0 + i * 15, vol=vol, pitch_st=pitch_st
+                    )
+                )
         return outputs

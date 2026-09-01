@@ -64,6 +64,7 @@ def narration_payload(
     narration: Narration,
     chunks: list[str],
     sequence: list[dict] | None = None,
+    voice_setting: dict | None = None,
 ) -> dict:
     voice = narration.voice
     prompt = storage.read_bytes(voice.prompt_pt_path)
@@ -72,9 +73,13 @@ def narration_payload(
         "narration_id": narration.id,
         "language": narration.language,
         "instruct": narration.delivery_direction,
+        "delivery_instruction": narration.delivery_direction,
         "chunks": chunks,
         "prompt_pt_b64": base64.b64encode(prompt).decode("ascii"),
     }
+    if voice_setting:
+        # Phase 7B: structured model-studio voice parameters flow to the worker.
+        payload["voice_setting"] = voice_setting
     if sequence:
         # Optional pause-aware stitching plan (Phase 5C). Unknown to older
         # workers, which simply ignore it; the backend applies it at completion.
@@ -88,6 +93,7 @@ def builtin_voice_payload(
     instruct: str,
     dialogue_segments: list[dict] | None = None,
     sequence: list[dict] | None = None,
+    voice_setting: dict | None = None,
 ) -> dict:
     """Payload for a ``custom_voice`` job (Qwen3-TTS CustomVoice).
 
@@ -110,8 +116,14 @@ def builtin_voice_payload(
         "speaker": speaker,
         "language": narration.language,
         "instruct": instruct,
+        "delivery_instruction": instruct,
         "chunks": [narration.script],
     }
+    if voice_setting:
+        # Phase 7B: the active speaker id is folded in so the worker can build
+        # the same voice_setting the frontend configured.
+        voice_setting = {**voice_setting, "voice_id": speaker}
+        payload["voice_setting"] = voice_setting
     if dialogue_segments is not None:
         payload["dialogue_segments"] = dialogue_segments
     if sequence:

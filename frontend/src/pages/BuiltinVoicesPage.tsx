@@ -38,6 +38,18 @@ const LANGUAGES = [
   'Italian',
 ]
 
+// Phase 7B emotion presets, mirroring the model-studio voice_setting.emotion
+// vocabulary exposed by the backend EmotionPreset enum.
+const EMOTION_PRESETS = [
+  'neutral',
+  'happy',
+  'sad',
+  'angry',
+  'calm',
+  'fierce',
+  'whisper',
+]
+
 const SINGLE_DEMO_SCRIPT =
   'Welcome to Voice Studio. This sample script is narrated by the single speaker you selected — no speaker tags required.'
 
@@ -61,6 +73,8 @@ export function BuiltinVoicesPage() {
   const [customVoices, setCustomVoices] = useState<Voice[]>([])
   const [speed, setSpeed] = useState(1.0)
   const [pitch, setPitch] = useState(0)
+  const [vol, setVol] = useState(1.0)
+  const [emotion, setEmotion] = useState('neutral')
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const announcedRef = useRef(false)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -183,6 +197,14 @@ export function BuiltinVoicesPage() {
     setResult(null)
     announcedRef.current = false
     setAnnouncement('')
+    const delivery = instruct.trim()
+    const voiceSetting = {
+      voice_id: selectedSpeaker,
+      speed,
+      pitch,
+      vol,
+      emotion,
+    }
     try {
       // Phase 6A unified flow: built-in speakers use the CustomVoice endpoint;
       // approved custom voices narrate through the cloned-voice narration API.
@@ -191,19 +213,27 @@ export function BuiltinVoicesPage() {
             speaker: selectedSpeaker,
             language,
             script: script.trim(),
-            instruct: instruct.trim(),
+            instruct: delivery,
+            delivery_instruction: delivery,
             title: title.trim(),
             speed,
             pitch,
+            vol,
+            emotion,
+            voice_setting: voiceSetting,
           })
         : await api.createNarration({
             voice_id: activeCustom?.id ?? '',
             title: title.trim(),
             script: script.trim(),
-            delivery_direction: instruct.trim(),
+            delivery_direction: delivery,
+            delivery_instruction: delivery,
             language,
             speed,
             pitch,
+            vol,
+            emotion,
+            voice_setting: voiceSetting,
           })
       setGeneratingId(narration.id)
       setResult(narration)
@@ -430,6 +460,39 @@ export function BuiltinVoicesPage() {
                       style={{ width: '100%', accentColor: 'var(--primary)' }}
                     />
                   </div>
+                  <div>
+                    <label style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                      <span>Volume Gain</span>
+                      <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>{vol.toFixed(1)}x</span>
+                    </label>
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={1.5}
+                      step={0.1}
+                      value={vol}
+                      onChange={(e) => setVol(parseFloat(e.target.value))}
+                      disabled={generating}
+                      aria-label={`Volume gain: ${vol.toFixed(1)}x`}
+                      style={{ width: '100%', accentColor: 'var(--primary)' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: '1rem' }}>
+                  <span style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '0.5rem' }}>Emotion preset</span>
+                  <div className="preset-chips" role="group" aria-label="Emotion presets">
+                    {EMOTION_PRESETS.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        className={`preset-chip${emotion === e ? ' active' : ''}`}
+                        aria-pressed={emotion === e}
+                        onClick={() => setEmotion(e)}
+                      >
+                        {e.charAt(0).toUpperCase() + e.slice(1)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -450,9 +513,10 @@ export function BuiltinVoicesPage() {
                     </button>
                   ))}
                 </div>
-                <input
+                <textarea
                   id="bv-instruct"
-                  type="text"
+                  className="input"
+                  rows={2}
                   value={instruct}
                   onChange={(e) => setInstruct(e.target.value)}
                   placeholder="e.g. warm and friendly, slightly slower pace"

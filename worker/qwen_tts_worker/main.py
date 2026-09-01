@@ -98,15 +98,17 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
             raise ValueError("narration job has no chunks")
         language = payload.get("language") or "English"
         instruct = payload.get("instruct") or ""
+        voice_setting = payload.get("voice_setting") or None
         logger.info(
-            "narration job %s: language=%s instruct=%r chunks=%d",
-            job_id, language, instruct, len(chunks),
+            "narration job %s: language=%s instruct=%r chunks=%d voice_setting=%r",
+            job_id, language, instruct, len(chunks), voice_setting,
         )
         outputs = backend.narrate(
             chunks=chunks,
             prompt_pt_b64=payload.get("prompt_pt_b64") or "",
             language=language,
             instruct=instruct,
+            voice_setting=voice_setting,
         )
         if len(outputs) != len(chunks):
             raise RuntimeError(
@@ -133,10 +135,11 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
         language = payload.get("language") or "English"
         instruct = payload.get("instruct") or ""
         dialogue_segments = payload.get("dialogue_segments")
+        voice_setting = payload.get("voice_setting") or None
         seg_count = len(dialogue_segments) if dialogue_segments else len(chunks)
         logger.info(
-            "custom_voice job %s: speaker=%s language=%s instruct=%r segments=%d",
-            job_id, speaker, language, instruct, seg_count,
+            "custom_voice job %s: speaker=%s language=%s instruct=%r segments=%d voice_setting=%r",
+            job_id, speaker, language, instruct, seg_count, voice_setting,
         )
         outputs = backend.generate_custom_voice(
             chunks=chunks,
@@ -144,6 +147,7 @@ def _process_job(client: WorkerAPIClient, backend: InferenceBackend, claim: dict
             language=language,
             instruct=instruct,
             dialogue_segments=dialogue_segments,
+            voice_setting=voice_setting,
         )
         if len(outputs) != seg_count:
             raise RuntimeError(
