@@ -77,7 +77,8 @@ describe('App — session handling', () => {
     renderApp(['/voices'])
     await waitFor(() => expect(screen.getByRole('button', { name: /alice/i })).toBeInTheDocument())
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: /alice/i }))
+    // Open the account popover, then log out from it.
+    await user.click(screen.getByRole('button', { name: /account: alice/i }))
     await waitFor(() => expect(screen.getByRole('button', { name: /log out/i })).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: /log out/i }))
     await waitFor(() =>
@@ -245,6 +246,14 @@ describe('App — workspace navigation shell (Phase 8a)', () => {
     renderApp(['/narration?reuse=n1'])
     await waitFor(() =>
       expect((screen.getByLabelText('Script') as HTMLTextAreaElement).value).toBe('Hello world'),
+    )
+  })
+
+  it('keeps the /tts-studio?voice= deep link contract intact', async () => {
+    mockFetch(navFetch)
+    renderApp(['/tts-studio?voice=cv1'])
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Active voice' })).toHaveTextContent('Senku'),
     )
   })
 

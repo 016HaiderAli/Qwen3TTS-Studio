@@ -129,11 +129,12 @@ a:hover {
   background: var(--panel);
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   position: sticky;
   top: 0;
   height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* Strictly no scrollbars: brand / nav / footer share the fixed 100vh. */
+  overflow: hidden;
   z-index: 20;
   transition: width 0.2s ease;
 }
@@ -173,6 +174,14 @@ a:hover {
   flex-shrink: 0;
 }
 
+.sidebar-brand-id {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .sidebar-collapse-toggle {
   display: flex;
   align-items: center;
@@ -204,6 +213,9 @@ a:hover {
   flex-direction: column;
   gap: 6px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .nav-group {
@@ -443,13 +455,129 @@ a:hover {
   transform: rotate(180deg);
 }
 
-/* Collapsed sidebar: fly the profile menu out to the right of the rail. */
-.app-sidebar.collapsed .sidebar-profile-menu {
-  left: calc(100% + 10px);
-  right: auto;
-  top: auto;
-  bottom: 0;
+/* Account pill wrapper: the popover anchors to this box. */
+.account-pill-wrap {
+  position: relative;
+}
+
+/* Floating account popover — rendered ABOVE the pill, absolutely positioned
+   so it never contributes to sidebar height (no scrollbars, ever). */
+.account-popover {
   position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: #161b26;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  padding: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: account-popover-in 0.16s ease-out;
+}
+
+/* Collapsed rail: fly the popover out to the right of the icons. */
+.app-sidebar.collapsed .account-popover {
+  left: calc(100% + 8px);
+  right: auto;
+  bottom: 0;
+  width: 220px;
+}
+
+@keyframes account-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.account-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.account-popover-avatar {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  border: 2px solid var(--primary);
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.account-popover-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.account-popover-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-popover-email {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-popover-divider {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.account-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.5rem 0.55rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.account-popover-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.account-popover-item-icon {
+  flex-shrink: 0;
+}
+
+.account-popover-item.logout {
+  color: var(--danger);
+}
+
+.account-popover-item.logout:hover {
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 .sidebar-backdrop {
@@ -480,7 +608,7 @@ a:hover {
 .topnav {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   width: 100%;
   gap: 1rem;
 }

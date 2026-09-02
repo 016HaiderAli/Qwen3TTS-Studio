@@ -2,27 +2,27 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
   Layers,
+  LogOut,
   Mic2,
-  Upload,
-  Volume2,
   PanelLeftClose,
   PanelLeftOpen,
-  LogOut,
-  Star,
-  MessageCircle,
+  Upload,
   User,
-  ChevronDown,
+  Volume2,
   type LucideIcon,
 } from 'lucide-react'
 import type { Me } from '../api'
 
 /**
- * Persistent workspace navigation (Phase 8a, ElevenLabs/HeyGen-style density).
+ * Persistent workspace navigation (Phase 8a, collapsible).
  *
  * Data-driven entries with per-item `isActive` predicates (location + query),
- * a brand header carrying the collapse toggle, a divider, a worker status
- * card, and the user account block anchored at the bottom — no empty floating
- * topbar space. Collapse state persists via localStorage.
+ * a brand header carrying the collapse toggle, and the account popover
+ * anchored above the bottom user pill.
+ *
+ * Layout is strictly 100vh with no internal scrollbars: brand / nav / footer
+ * share the fixed height via space-between, so opening the account popover
+ * can never push content off-screen.
  */
 interface NavEntry {
   key: string
@@ -83,8 +83,8 @@ export function AppSidebar({
   const { pathname } = useLocation()
   const [params] = useSearchParams()
   const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsedPreference())
-  const [dropdownOpen, setDropdownOpen] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const accountRef = useRef<HTMLDivElement>(null)
 
   // Persist the preference; storage failures are non-fatal.
   useEffect(() => {
@@ -95,20 +95,26 @@ export function AppSidebar({
     }
   }, [collapsed])
 
-  // Close the account dropdown on outside click.
+  // Close the account popover on outside click or Escape.
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false)
+    if (!accountOpen) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (accountRef.current && !accountRef.current.contains(e.target as Node)) {
+        setAccountOpen(false)
       }
     }
-    if (dropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAccountOpen(false)
     }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
     }
-  }, [dropdownOpen])
+  }, [accountOpen])
 
   const toggleCollapsed = () => setCollapsed((prev) => !prev)
 
@@ -118,8 +124,10 @@ export function AppSidebar({
       aria-label="Voice Studio workspace"
     >
       <div className="sidebar-brand">
-        <Mic2 size={17} strokeWidth={2.5} className="sidebar-brand-icon" />
-        {!collapsed && <span className="sidebar-brand-text">Voice Studio</span>}
+        <span className="sidebar-brand-id">
+          <Mic2 size={17} strokeWidth={2.5} className="sidebar-brand-icon" />
+          {!collapsed && <span className="sidebar-brand-text">Voice Studio</span>}
+        </span>
         <button
           type="button"
           className="sidebar-collapse-toggle"
@@ -176,20 +184,22 @@ export function AppSidebar({
           />
         )}
 
+        {/* Account pill + floating popover (renders above the pill, never in
+            the sidebar flow — the sidebar cannot scroll because of it). */}
         <div className="sidebar-divider" role="separator" />
 
-        {/* Account block anchored at the bottom of the sidebar. */}
-        <div className="account-dropdown" ref={dropdownRef}>
+        <div className="account-pill-wrap" ref={accountRef}>
           <button
             type="button"
             className="sidebar-account"
-            onClick={() => setDropdownOpen((prev) => !prev)}
-            aria-label={me.name || me.email}
-            aria-expanded={dropdownOpen}
+            onClick={() => setAccountOpen((prev) => !prev)}
+            aria-label={`Account: ${me.name || me.email}`}
+            aria-haspopup="dialog"
+            aria-expanded={accountOpen}
             title={collapsed ? me.name || me.email : undefined}
           >
             <span className="sidebar-account-avatar">
-              <User size={16} strokeWidth={2.2} />
+              <User size={15} strokeWidth={2.2} />
             </span>
             {!collapsed && (
               <span className="sidebar-account-text">
@@ -197,43 +207,29 @@ export function AppSidebar({
                 <span className="sidebar-account-hint">Account</span>
               </span>
             )}
-            {!collapsed && (
-              <ChevronDown
-                size={13}
-                strokeWidth={2.4}
-                className={`sidebar-account-chevron ${dropdownOpen ? 'open' : ''}`}
-              />
-            )}
           </button>
-          {dropdownOpen && (
-            <div className="profile-menu sidebar-profile-menu" role="menu">
-              {!collapsed && (
-                <>
-                  <div className="profile-menu-header">
-                    <div className="profile-menu-avatar">
-                      <User size={22} strokeWidth={2} />
-                    </div>
-                    <span className="profile-menu-name">{me.name || me.email}</span>
-                  </div>
-                  <div className="profile-menu-divider" />
-                  <button className="profile-menu-item" disabled>
-                    <span className="menu-item-icon"><Star size={15} strokeWidth={2} /></span>
-                    <span className="menu-item-label">Rate Us</span>
-                    <span className="menu-item-badge">Soon</span>
-                  </button>
-                  <button className="profile-menu-item" disabled>
-                    <span className="menu-item-icon">
-                      <MessageCircle size={15} strokeWidth={2} />
-                    </span>
-                    <span className="menu-item-label">Feedback / Report</span>
-                    <span className="menu-item-badge">Soon</span>
-                  </button>
-                  <div className="profile-menu-divider" />
-                </>
-              )}
-              <button className="profile-menu-item danger" onClick={onLogout}>
-                <span className="menu-item-icon"><LogOut size={15} strokeWidth={2} /></span>
-                <span className="menu-item-label">Log out</span>
+
+          {accountOpen && (
+            <div className="account-popover" role="dialog" aria-label="Account">
+              <div className="account-popover-header">
+                <span className="account-popover-avatar" aria-hidden="true">
+                  <User size={18} strokeWidth={2.2} />
+                </span>
+                <div className="account-popover-id">
+                  <span className="account-popover-name">{me.name || me.email}</span>
+                  {me.name && me.email && (
+                    <span className="account-popover-email">{me.email}</span>
+                  )}
+                </div>
+              </div>
+              <div className="account-popover-divider" role="separator" />
+              <button
+                type="button"
+                className="account-popover-item logout"
+                onClick={() => void onLogout()}
+              >
+                <LogOut size={15} strokeWidth={2} className="account-popover-item-icon" />
+                <span>Log out</span>
               </button>
             </div>
           )}
